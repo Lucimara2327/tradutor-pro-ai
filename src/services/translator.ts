@@ -143,13 +143,22 @@ export async function unifiedTranslate(
   };
 
   // Helper to attempt a translation with specific parameters
-  async function performTranslation(currentEngine: 'gemini' | 'openai'): Promise<TranslationResult> {
+  async function performTranslation(currentEngine: 'gemini' | 'openai', forceNormal: boolean = false): Promise<TranslationResult> {
+    const activeFluent = forceNormal ? false : (currentEngine === 'openai' ? fluentMode : false);
+    
     // 1. Try Server-side API first
     try {
       const response = await withTimeout(fetch('/api/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, fromLang, toLang, engine: currentEngine, model, fluentMode })
+        body: JSON.stringify({ 
+          text, 
+          fromLang, 
+          toLang, 
+          engine: currentEngine, 
+          model, 
+          fluentMode: activeFluent 
+        })
       }), 15000);
 
       if (response.ok) {
@@ -167,10 +176,11 @@ export async function unifiedTranslate(
         let resultText = '';
         if (currentEngine === 'gemini') {
           const geminiModel = "models/gemini-1.5-flash";
-          resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, fluentMode), 15000);
+          // Gemini NUNCA usa modo fluente
+          resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, false), 15000);
         } else {
           const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
-          resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, fluentMode), 15000);
+          resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, activeFluent), 15000);
         }
 
         if (isValidTranslation(text, resultText)) {
@@ -187,24 +197,30 @@ export async function unifiedTranslate(
   try {
     let result: TranslationResult;
 
-    // 3. FLUXO FINAL DE TRADUÇÃO
-    if (fluentMode) {
-      // 1. Tentar OpenAI -> 2. Gemini -> 3. Local
+    // 3/4. FLUXO FINAL DE TRADUÇÃO REEESTRUTURADO
+    // Gemini selecionado E 'Modo Fluente' não existe para ele -> Forçamos o fluxo do motor
+    const isGeminiSelected = settings.engine === 'gemini';
+
+    if (fluentMode && !isGeminiSelected) {
+      // Modo Fluente ATIVO (OpenAI): 1. OpenAI -> 2. Gemini -> 3. Local
       try {
         result = await performTranslation('openai');
       } catch (openaiErr) {
         try {
-          result = await performTranslation('gemini');
+          // Gemini fallback sempre normal
+          result = await performTranslation('gemini', true);
         } catch (geminiErr) {
           const localText = await translateLocal(text, fromLang, toLang);
           result = { text: localText, source: 'client' };
         }
       }
     } else {
-      // 1. Tentar Gemini -> 2. Local
+      // Modo Fluente DESATIVADO ou Motor GEMINI: 1. Gemini -> 2. Local fallback
       try {
-        result = await performTranslation('gemini');
+        result = await performTranslation('gemini', true);
       } catch (err) {
+        // Se Gemini falhar, tentamos OpenAI normal como backup antes do local? 
+        // O pedido diz: "Modo Fluente DESATIVADO: 1. Tentar Gemini -> 2. Se falhar → tradução local"
         const localText = await translateLocal(text, fromLang, toLang);
         result = { text: localText, source: 'client' };
       }

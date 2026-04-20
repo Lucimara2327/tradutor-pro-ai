@@ -28,7 +28,7 @@ async function startServer() {
 
         let translated = '';
 
-        if (engine === 'openai' || (isFluent && engine === 'gemini')) {
+        if (engine === 'openai') {
           const apiKey = process.env.OPENAI_API_KEY;
           if (!apiKey) {
             throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
@@ -37,25 +37,20 @@ async function startServer() {
           const openai = new OpenAI({ apiKey });
           const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
 
-          const normalPrompt = `Você é um tradutor profissional. Sua tarefa é traduzir o texto de forma DIRETA, LITERAL e FIEL. 
+          const normalPrompt = `Você é um tradutor PRO. Traduza o texto de forma DIRETA, LITERAL e FIEL. 
 REGRAS:
-- PRIORIDADE: Sempre priorize a tradução literal.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- NÃO interprete o texto.
-- NÃO adicione palavras ou explicações.
-- Mantenha a estrutura exata da frase original.
-- Responda APENAS com a tradução.
-Idioma de destino: ${toLang}`;
+- PRIORIDADE: Tradução literal absoluta.
+- AMBIGUIDADE: Use o significado mais comum.
+- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
+Idioma destino: ${toLang}`;
 
-          const fluentPrompt = `Você é um tradutor profissional. Sua tarefa é traduzir o texto de forma NATURAL e FLUIDA, mas mantendo a FIDELIDADE ABSOLUTA ao significado original.
+          const fluentPrompt = `Você é um tradutor PRO inteligente. Traduza o texto de forma NATURAL e FLUENTE.
 REGRAS:
-- PRIORIDADE: Priorize a fidelidade à tradução literal antes da fluidez.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- NÃO reformule o sentido.
-- NÃO invente frases ou adicione palavras (como "querido", "amigo", etc).
-- Ajuste apenas a gramática e concordância para soar natural no idioma de destino.
-- Responda APENAS com a tradução.
-Idioma de destino: ${toLang}`;
+- FLUIDEZ: Melhore levemente a concordância e naturalidade.
+- FIDELIDADE: Mantenha o significado e intenção original intactos.
+- AMBIGUIDADE: Use o significado mais comum.
+- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
+Idioma destino: ${toLang}`;
 
           const response = await openai.chat.completions.create({
             model: openaiModel,
@@ -69,7 +64,7 @@ Idioma de destino: ${toLang}`;
                 content: text,
               },
             ],
-            temperature: isFluent ? 0.3 : 0.1, // Lower temperature for accuracy
+            temperature: isFluent ? 0.2 : 0.05,
           });
 
           translated = response.choices[0]?.message?.content?.trim() || '';
@@ -82,39 +77,23 @@ Idioma de destino: ${toLang}`;
           const ai = new GoogleGenAI({ apiKey });
           const geminiModel = "models/gemini-1.5-flash";
 
-          const context = `Traduza de ${fromLang === 'auto' ? 'detectado' : fromLang} para ${toLang}.`;
-          
-          const normalRules = `
-REGRAS (MODO NORMAL):
-- PRIORIDADE: Sempre priorize a tradução literal.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- Tradução DIRETA, LITERAL e CORRETA.
-- Manter a estrutura da frase original.
-- NÃO interpretar, NÃO reformular, NÃO adicionar palavras.`;
+          const promptText = `Você é um tradutor rápido. Traduza de forma DIRETA e LITERAL.
+Regras:
+- NÃO use modo fluente.
+- NÃO reescreva ou interprete.
+- Priorize velocidade e fidelidade literal.
+- Se houver ambiguidade, escolha o significado mais comum.
+- Retorne APENAS o texto traduzido.
+Idioma destino: ${toLang}
 
-          const fluentRules = `
-REGRAS (MODO FLUENTE):
-- PRIORIDADE: Priorize a fidelidade à tradução literal antes da fluidez.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- Tradução NATURAL e FLUIDA.
-- FIDELIDADE ABSOLUTA ao significado e intenção original.
-- Ajuste apenas gramática e concordância.
-- NÃO invente frases, NÃO adicione palavras extras.`;
-
-          const promptText = `Você é um tradutor profissional. ${context}
-${isFluent ? fluentRules : normalRules}
-
-Proibido: responder como chat, fazer perguntas, explicações ou aspas.
-Retorne APENAS o texto traduzido.
-
-Texto original:
+Texto:
 ${text}`;
 
           const response = await ai.models.generateContent({
             model: geminiModel,
             contents: [{ parts: [{ text: promptText }] }],
             config: {
-              temperature: isFluent ? 0.3 : 0.1,
+              temperature: 0.0, // Maximum deterministic speed and accuracy
             }
           });
 

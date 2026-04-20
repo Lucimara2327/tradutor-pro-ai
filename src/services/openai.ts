@@ -30,25 +30,20 @@ export async function translateText(
     try {
       const isFluent = !!fluentMode;
 
-      const normalPrompt = `Você é um tradutor profissional. Sua tarefa é traduzir o texto de forma DIRETA, LITERAL e FIEL. 
+      const normalPrompt = `Você é um tradutor PRO. Traduza o texto de forma DIRETA, LITERAL e FIEL. 
 REGRAS:
-- PRIORIDADE: Sempre priorize a tradução literal.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- NÃO interprete o texto.
-- NÃO adicione palavras ou explicações.
-- Mantenha a estrutura exata da frase original.
-- Responda APENAS com a tradução.
-Idioma de destino: ${toLang}`;
+- PRIORIDADE: Tradução literal absoluta.
+- AMBIGUIDADE: Use o significado mais comum.
+- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
+Idioma destino: ${toLang}`;
 
-      const fluentPrompt = `Você é um tradutor profissional. Sua tarefa é traduzir o texto de forma NATURAL e FLUIDA, mas mantendo a FIDELIDADE ABSOLUTA ao significado original.
+      const fluentPrompt = `Você é um tradutor PRO inteligente. Traduza o texto de forma NATURAL e FLUENTE.
 REGRAS:
-- PRIORIDADE: Priorize a fidelidade à tradução literal antes da fluidez.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- NÃO reformule o sentido.
-- NÃO invente frases ou adicione palavras (como "querido", "amigo", etc).
-- Ajuste apenas a gramática e concordância para soar natural no idioma de destino.
-- Responda APENAS com a tradução.
-Idioma de destino: ${toLang}`;
+- FLUIDEZ: Melhore levemente a concordância e naturalidade.
+- FIDELIDADE: Mantenha o significado e intenção original intactos.
+- AMBIGUIDADE: Use o significado mais comum.
+- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
+Idioma destino: ${toLang}`;
 
       const response = await client.chat.completions.create({
         model: model,
@@ -62,7 +57,7 @@ Idioma de destino: ${toLang}`;
             content: text,
           },
         ],
-        temperature: isFluent ? 0.3 : 0.1,
+        temperature: isFluent ? 0.2 : 0.05,
       });
 
       const translated = response.choices[0]?.message?.content?.trim();

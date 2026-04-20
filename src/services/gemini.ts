@@ -68,28 +68,13 @@ export async function translateWithGemini(
       const ai = getGeminiClient(apiKey);
       const model = "models/gemini-1.5-flash";
 
-      const normalRules = `
-REGRAS (MODO NORMAL):
-- PRIORIDADE: Sempre priorize a tradução literal.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- Tradução DIRETA, LITERAL e CORRETA.
-- Manter a estrutura da frase original.
-- NÃO interpretar, NÃO reformular, NÃO adicionar palavras.`;
-
-      const fluentRules = `
-REGRAS (MODO FLUENTE):
-- PRIORIDADE: Priorize a fidelidade à tradução literal antes da fluidez.
-- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
-- Tradução NATURAL e FLUIDA.
-- FIDELIDADE ABSOLUTA ao significado e intenção original.
-- Ajuste apenas gramática e concordância.
-- NÃO invente frases, NÃO adicione palavras extras (como "querido", "amigo", etc).`;
-
-      const prompt = `Você é um tradutor profissional. Traduza de ${fromLang === 'auto' ? 'detectado' : fromLang} para ${toLang}.
-${fluentMode ? fluentRules : normalRules}
-
-Proibido: responder como chat, fazer perguntas, explicações ou aspas.
-Retorne APENAS o texto traduzido.
+      const prompt = `Você é um tradutor rápido. Traduza de ${fromLang === 'auto' ? 'detectado' : fromLang} para ${toLang}.
+Regras:
+- TRADUÇÃO DIRETA, LITERAL e CORRETA.
+- NÃO use modo fluente ou reescrita.
+- Priorize velocidade e fidelidade literal.
+- Se houver ambiguidade, escolha o significado mais comum.
+- Retorne APENAS o texto traduzido.
 
 Texto original:
 ${text}`;
@@ -98,7 +83,7 @@ ${text}`;
         model: model,
         contents: [{ parts: [{ text: prompt }] }],
         config: {
-          temperature: fluentMode ? 0.3 : 0.1,
+          temperature: 0.0,
         }
       });
 
