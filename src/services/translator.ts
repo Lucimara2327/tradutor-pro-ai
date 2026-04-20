@@ -8,6 +8,8 @@ export interface TranslationResult {
   source: 'server' | 'client';
 }
 
+const translationCache = new Map<string, TranslationResult>();
+
 export async function unifiedTranslate(
   text: string,
   fromLang: string,
@@ -15,6 +17,12 @@ export async function unifiedTranslate(
   settings: AppSettings
 ): Promise<TranslationResult> {
   const { engine, model, geminiApiKey, openaiApiKey } = settings;
+  const cacheKey = `${engine}-${model}-${fromLang}-${toLang}-${text}`;
+
+  // Check Cache first
+  if (translationCache.has(cacheKey)) {
+    return translationCache.get(cacheKey)!;
+  }
 
   // Try Server-side API first (Secure Layer)
   try {
@@ -27,7 +35,9 @@ export async function unifiedTranslate(
     if (response.ok) {
       const data = await response.json();
       if (data.translatedText) {
-        return { text: data.translatedText, source: 'server' };
+        const result: TranslationResult = { text: data.translatedText, source: 'server' };
+        translationCache.set(cacheKey, result);
+        return result;
       }
     }
     
@@ -56,7 +66,9 @@ export async function unifiedTranslate(
     resultText = await translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel);
   }
 
-  return { text: resultText, source: 'client' };
+  const finalResult: TranslationResult = { text: resultText, source: 'client' };
+  translationCache.set(cacheKey, finalResult);
+  return finalResult;
 }
 
 export async function unifiedSpeak(

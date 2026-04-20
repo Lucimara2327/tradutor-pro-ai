@@ -1,13 +1,18 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Languages, History, Settings, Star, Info } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import AppInfo from './AppInfo';
 
 export default function Layout() {
+  const [isAppInfoOpen, setIsAppInfoOpen] = useState(false);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-main)] text-[var(--text-main)] transition-colors duration-300">
+      {/* App Info Modal */}
+      <AppInfo isOpen={isAppInfoOpen} onClose={() => setIsAppInfoOpen(false)} />
       {/* Sidebar - Desktop */}
       <aside className="w-[280px] bg-[var(--sidebar-bg)] border-r border-[var(--card-border)] flex flex-col p-6 hidden lg:flex shrink-0">
         <div className="flex items-center gap-3 mb-10">
@@ -52,9 +57,12 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-3">
-             <div className="p-2 rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-500 transition-colors">
+             <button 
+                onClick={() => setIsAppInfoOpen(true)}
+                className="p-2 rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700 hover:text-[#7B3FE4] transition-all"
+             >
                 <Info size={18} />
-             </div>
+             </button>
           </div>
         </header>
 

@@ -41,8 +41,12 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [translationSource, setTranslationSource] = useState<'server' | 'client' | null>(null);
+  const [isProcessingOCR, setIsProcessingOCR] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [ocrStatus, setOcrStatus] = useState('');
 
   const ttsTimeoutRef = useRef<number | null>(null);
+  const lastInputRef = useRef<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -62,6 +66,24 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       stopGeminiAudio();
     };
   }, []);
+
+  // Auto-translation debounce
+  useEffect(() => {
+    if (!inputText.trim()) {
+      setTranslatedText('');
+      lastInputRef.current = '';
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (inputText.trim() && !isLoading && !isProcessingOCR) {
+        // Reset lastInputRef if settings changed so it forces re-run
+        handleTranslate();
+      }
+    }, 1200); // Slightly more aggressive debounce (1.2s)
+
+    return () => clearTimeout(timer);
+  }, [inputText, fromLang, toLang, settings.engine, settings.model]);
 
   const stopGeminiAudio = () => {
     if (currentAudioSourceRef.current) {
@@ -145,8 +167,13 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   const handleTranslate = async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isLoading) return;
     
+    // Composite key for optimization (avoids repeat with same context)
+    const currentContext = `${inputText.trim()}-${fromLang}-${toLang}-${settings.engine}-${settings.model}`;
+    if (currentContext === lastInputRef.current) return;
+    lastInputRef.current = currentContext;
+
     // Stop any playing audio
     window.speechSynthesis.cancel();
     stopGeminiAudio();
@@ -284,12 +311,95 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     recognitionRef.current?.stop();
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      // Mock OCR warning
-      alert("Função OCR (reconhecimento de texto em imagem) em desenvolvimento. A imagem selecionada é: " + file.name);
+    if (!file) return;
+
+    setIsProcessingOCR(true);
+    setOcrProgress(0);
+    setOcrStatus('Processando imagem...');
+    setError(null);
+
+    try {
+      // 1. Resize and compress image for faster OCR (highly aggressive)
+      const processedImage = await preprocessImage(file);
+      
+      setOcrStatus('Extraindo texto...');
+      // 2. OCR with Tesseract.js (Fast configuration)
+      const { createWorker } = await import('tesseract.js');
+      
+      const worker = await createWorker('por+eng', 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            setOcrProgress(Math.round(m.progress * 100));
+          }
+        },
+      });
+      
+      const { data: { text } } = await worker.recognize(processedImage);
+      await worker.terminate();
+
+      if (text && text.trim()) {
+        const cleanedText = text.trim()
+          .replace(/\n\s*\n/g, '\n') // Remove empty lines
+          .replace(/\s+/g, ' ');      // Normalize spaces
+        
+        setInputText(cleanedText);
+        setOcrProgress(100);
+        setOcrStatus('Traduzindo...');
+        
+        // The auto-translate useEffect will pick this up immediately
+      } else {
+        setError('Não foi possível encontrar texto legível nesta imagem.');
+      }
+    } catch (err) {
+      console.error('OCR Error:', err);
+      setError('Erro ao processar imagem.');
+    } finally {
+      setTimeout(() => {
+        setIsProcessingOCR(false);
+        setOcrProgress(0);
+        setOcrStatus('');
+      }, 500);
+      e.target.value = '';
     }
+  };
+
+  const preprocessImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800; // Even faster resolution
+          let width = img.width;
+          let height = img.height;
+
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Canvas context failed'));
+            return;
+          }
+          
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // More aggressive compression for speed
+          resolve(canvas.toDataURL('image/jpeg', 0.5));
+        };
+        img.onerror = () => reject(new Error('Image load failed'));
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => reject(new Error('File read failed'));
+      reader.readAsDataURL(file);
+    });
   };
 
   return (
@@ -367,6 +477,40 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
               isListening && "border-[#7B3FE4] ring-4 ring-[#7B3FE4]/10 shadow-[0_0_30px_rgba(123,63,228,0.1)] lg:shadow-[0_0_50px_rgba(123,63,228,0.1)]"
             )}
           />
+
+          {/* OCR Processing Overlay */}
+          <AnimatePresence>
+            {isProcessingOCR && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-30 rounded-[32px] bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md flex flex-col items-center justify-center gap-6 p-8 border-2 border-[#7B3FE4]/20"
+              >
+                <div className="relative">
+                  <Loader2 className="w-16 h-16 text-[#7B3FE4] animate-spin" strokeWidth={1.5} />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-[10px] font-black text-[#7B3FE4]">{ocrProgress}%</span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <span className="text-sm font-black uppercase tracking-[3px] text-slate-800 dark:text-white">{ocrStatus}</span>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest max-w-[200px]">
+                    {ocrProgress < 100 ? 'Extraindo texto para tradução...' : 'Quase pronto...'}
+                  </p>
+                </div>
+                
+                {/* Mini progress bar */}
+                <div className="w-48 h-1 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    className="h-full bg-gradient-to-r from-[#7B3FE4] to-[#3F8EFC]"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${ocrProgress}%` }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           
           <div className="absolute top-5 right-7 flex flex-col items-end gap-1 opacity-40">
             <span className="text-[9px] font-black uppercase tracking-widest">{inputText.length}</span>
