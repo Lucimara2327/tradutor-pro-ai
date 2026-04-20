@@ -1,7 +1,7 @@
 {
   "name": "Tradutor Pro AI",
   "short_name": "Tradutor Pro",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#7B3FE4",
