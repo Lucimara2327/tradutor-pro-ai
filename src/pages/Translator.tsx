@@ -308,7 +308,14 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
-      source.connect(audioContextRef.current.destination);
+      
+      // Add gain node for volume control (to avoid "screaming" audio)
+      const gainNode = audioContextRef.current.createGain();
+      gainNode.gain.value = 0.7; // As requested, set to 0.7 for comfort
+      
+      source.connect(gainNode);
+      gainNode.connect(audioContextRef.current.destination);
+      
       source.onended = () => {
         setIsSpeaking(false);
         currentAudioSourceRef.current = null;
@@ -321,7 +328,30 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       console.warn('Gemini TTS failed, falling back to system TTS', error);
       // System Fallback
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = langCode === 'auto' ? 'pt-BR' : langCode;
+      
+      // Language targeting
+      const targetLang = langCode === 'auto' ? 'pt-BR' : langCode;
+      utterance.lang = targetLang;
+      
+      // User requested properties: suave, natural e agradável
+      utterance.volume = 0.7;
+      utterance.rate = 0.9;
+      utterance.pitch = 1.0;
+
+      // Select better voice
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        // Try to find a high-quality/natural voice for the target language
+        const preferredVoice = voices.find(v => 
+          v.lang.startsWith(targetLang) && 
+          (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium'))
+        ) || voices.find(v => v.lang.startsWith(targetLang));
+        
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+      }
+
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => setIsSpeaking(false);
       utterance.onerror = () => setIsSpeaking(false);
@@ -584,12 +614,25 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
             </button>
 
             {inputText && (
-              <button 
-                onClick={handleClear}
-                className="p-3 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
-              >
-                <Trash2 size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => speak(inputText, fromLang)}
+                  className={cn(
+                    "p-3 rounded-2xl transition-all shadow-sm active:scale-90",
+                    isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4]"
+                  )}
+                  title="Ouvir texto original"
+                >
+                  <Volume2 size={20} />
+                </button>
+                <button 
+                  onClick={handleClear}
+                  className="p-3 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
+                  title="Limpar"
+                >
+                  <Trash2 size={20} />
+                </button>
+              </div>
             )}
           </div>
         </div>

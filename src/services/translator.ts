@@ -43,8 +43,9 @@ export async function unifiedTranslate(
       body: JSON.stringify({ text, fromLang, toLang, engine, model })
     });
 
+    const data = await response.json();
+
     if (response.ok) {
-      const data = await response.json();
       if (data.translatedText) {
         const result: TranslationResult = { text: data.translatedText, source: 'server' };
         translationCache.set(cacheKey, result);
@@ -53,24 +54,18 @@ export async function unifiedTranslate(
     }
     
     // If we get an error from server, check if it's because keys aren't set in backend
-    try {
-      const errorData = await response.json();
-      if (errorData.source === 'server' || (errorData.error && errorData.error.includes('KEY'))) {
-        console.warn('Backend keys missing or invalid, falling back to client-side keys');
-      } else if (response.status >= 500) {
-        throw new Error('SERVER_OVERLOAD');
-      } else {
-        throw new Error(errorData.error || 'SERVER_ERROR');
-      }
-    } catch (e: any) {
-      if (e.message === 'SERVER_OVERLOAD') throw e;
-      // ignore JSON parse errors and continue to client fallback
+    if (data.source === 'server' || data.code === 'INVALID_KEY' || (data.error && data.error.includes('KEY'))) {
+      console.warn('Backend keys missing or invalid, falling back to client-side keys');
+    } else if (response.status >= 500) {
+      throw new Error('SERVER_OVERLOAD');
+    } else {
+      throw new Error(data.error || 'SERVER_ERROR');
     }
   } catch (error: any) {
     if (error.message === 'SERVER_OVERLOAD') {
       throw new Error('O servidor está sobrecarregado no momento. Tente novamente em alguns segundos.');
     }
-    console.warn('Server API not available, falling back to client-side translation', error);
+    console.warn('Server API error or not available, falling back to client-side translation', error);
   }
 
   // Fallback to client-side translation (Legacy/Local usage)

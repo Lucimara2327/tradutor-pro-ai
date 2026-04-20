@@ -109,11 +109,16 @@ Responda APENAS com a tradução, sem explicações.`
       return res.json({ translatedText });
     } catch (error: any) {
       console.error('Server translation error:', error);
-      const isConfigError = error.message.includes('NOT_CONFIGURED');
-      res.status(isConfigError ? 500 : 500).json({ 
-        error: error.message || 'Translation failed',
-        source: isConfigError ? 'server' : 'unknown',
-        code: error.status === 401 ? 'INVALID_KEY' : 'SERVER_ERROR'
+      
+      const errorMsg = error.message || '';
+      const isInvalidKey = errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_KEY') || error.status === 401;
+      const isConfigError = errorMsg.includes('NOT_CONFIGURED') || isInvalidKey;
+      
+      res.status(isInvalidKey ? 401 : 500).json({ 
+        error: isInvalidKey ? 'Chave API do servidor inválida' : (error.message || 'Translation failed'),
+        source: 'server',
+        code: isInvalidKey ? 'INVALID_KEY' : 'SERVER_ERROR',
+        details: errorMsg
       });
     }
   });
