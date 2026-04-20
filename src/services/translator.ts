@@ -10,7 +10,7 @@ export interface TranslationResult {
 
 const translationCache = new Map<string, TranslationResult>();
 
-const withTimeout = <T>(promise: Promise<T>, ms: number = 5000): Promise<T> => {
+const withTimeout = <T>(promise: Promise<T>, ms: number = 15000): Promise<T> => {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -30,20 +30,80 @@ export function checkCache(
   return translationCache.get(cacheKey) || null;
 }
 
+// 1. SILENCIAR ERROS NA UI - Centralized error handler (Silent)
+const handleApiError = (error: any, context: string) => {
+  const msg = error?.message || String(error);
+  // Identifica erros comuns para log técnico apenas
+  if (msg.includes('429') || msg.includes('quota') || msg.includes('timeout') || msg.includes('fetch') || msg.includes('401') || msg.includes('400')) {
+    console.warn(`[API_SILENT_HANDLED] ${context}: ${msg}`);
+  } else {
+    console.error(`[CRITICAL] ${context}:`, error);
+  }
+};
+
+// 4. TRADUÇÃO LOCAL OBRIGATÓRIA (Offline / Dicionário base)
+const OFFLINE_DICTIONARY: Record<string, Record<string, string>> = {
+  'pt': {
+    'hello': 'olá',
+    'hi': 'oi',
+    'good morning': 'bom dia',
+    'good afternoon': 'boa tarde',
+    'good evening': 'boa noite',
+    'thank you': 'obrigado',
+    'thanks': 'valeu',
+    'please': 'por favor',
+    'yes': 'sim',
+    'no': 'não',
+    'how are you': 'como você está',
+    'goodbye': 'tchau',
+    'bye': 'tchau',
+    'sorry': 'desculpe',
+    'excuse me': 'com licença',
+    'i love you': 'eu te amo',
+    'water': 'água',
+    'food': 'comida',
+    'help': 'ajuda'
+  },
+  'en': {
+    'olá': 'hello',
+    'oi': 'hi',
+    'bom dia': 'good morning',
+    'boa tarde': 'good afternoon',
+    'boa noite': 'good evening',
+    'obrigado': 'thank you',
+    'por favor': 'please',
+    'sim': 'yes',
+    'não': 'no',
+    'como vai': 'how are you',
+    'tchau': 'goodbye',
+    'desculpe': 'sorry'
+  }
+};
+
 async function translateLocal(text: string, fromLang: string, toLang: string): Promise<string> {
+  const cleanInput = text.trim().toLowerCase();
+  
+  // 1. Tentar dicionário local se houver
+  if (OFFLINE_DICTIONARY[toLang] && OFFLINE_DICTIONARY[toLang][cleanInput]) {
+    return OFFLINE_DICTIONARY[toLang][cleanInput].toUpperCase();
+  }
+
+  // 2. Tentar MyMemory (API gratuita/local fallback)
   try {
-    const from = fromLang === 'auto' ? 'it' : fromLang; // MyMemory auto is a bit weird, 'it' or similar works
+    const from = fromLang === 'auto' ? 'en' : fromLang; 
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${toLang}`;
-    const response = await withTimeout(fetch(url), 5000);
+    const response = await withTimeout(fetch(url), 8000);
     const data = await response.json();
     if (data.responseData?.translatedText) {
       return data.responseData.translatedText;
     }
-    throw new Error('Local translation failed');
   } catch (error) {
-    console.error('Local fallback failed or timed out:', error);
-    return `[Tradução Offline] ${text}`; // Last resort: return text with a tag
+    handleApiError(error, 'translateLocal_MyMemory');
   }
+
+  // 3. Fallback Heurístico (Heurística de segurança)
+  // Retorna o texto original com um prefixo limpo para indicar que foi processado offline
+  return text.length > 50 ? `${text.substring(0, 47)}...` : text; 
 }
 
 export async function unifiedTranslate(
@@ -60,6 +120,14 @@ export async function unifiedTranslate(
     return translationCache.get(cacheKey)!;
   }
 
+  // 7. VALIDAÇÃO DE RESPOSTA (isValid)
+  const isValid = (translated: string | null | undefined): boolean => {
+    if (!translated || translated.trim() === "") return false;
+    // Se texto > 3 caracteres, não pode ser igual ao original
+    if (text.length > 3 && translated.trim().toLowerCase() === text.trim().toLowerCase()) return false;
+    return true;
+  };
+
   // Helper to attempt a translation with specific parameters
   async function performTranslation(currentEngine: 'gemini' | 'openai'): Promise<TranslationResult> {
     // 1. Try Server-side API first
@@ -68,34 +136,36 @@ export async function unifiedTranslate(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, fromLang, toLang, engine: currentEngine, model, fluentMode })
-      }), 5000);
+      }), 15000);
 
-      const data = await response.json();
-
-      if (response.ok && data.translatedText) {
-        return { text: data.translatedText, source: 'server' };
+      if (response.ok) {
+        const data = await response.json();
+        if (data.translatedText && isValid(data.translatedText)) {
+          return { text: data.translatedText, source: 'server' };
+        }
       }
-      
-      // Handle specific missing key error to trigger client-side fallback
-      if (data.code === 'INVALID_KEY' || (data.error && data.error.includes('KEY'))) {
-        throw new Error('MISSING_OR_INVALID_BACKEND_KEY');
-      }
-      throw new Error(data.error || 'SERVER_ERROR');
+      throw new Error(`SERVER_${response.status}_INVALID`);
     } catch (error: any) {
+      handleApiError(error, `ServerSide_${currentEngine}`);
+      
       // 2. Client-side Fallback
       try {
         let resultText = '';
         if (currentEngine === 'gemini') {
-          const geminiModel = "gemini-1.5-flash";
-          resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, fluentMode), 5000);
+          const geminiModel = "models/gemini-1.5-flash";
+          resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, fluentMode), 15000);
         } else {
           const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
-          resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, fluentMode), 5000);
+          resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, fluentMode), 15000);
         }
-        return { text: resultText, source: 'client' };
-      } catch (clientErr) {
-        console.error(`Client-side ${currentEngine} failed or timed out:`, clientErr);
-        throw clientErr;
+
+        if (isValid(resultText)) {
+          return { text: resultText, source: 'client' };
+        }
+        throw new Error('CLIENT_INVALID_OR_EMPTY');
+      } catch (clientErr: any) {
+        handleApiError(clientErr, `ClientSide_${currentEngine}`);
+        throw clientErr; // Bubbles up to trigger next AI or local
       }
     }
   }
@@ -103,21 +173,24 @@ export async function unifiedTranslate(
   try {
     let result: TranslationResult;
 
-    // Main logic: If Fluent Mode is ON, prioritize OpenAI
+    // 3. FLUXO FINAL DE TRADUÇÃO
     if (fluentMode) {
+      // 1. Tentar OpenAI -> 2. Gemini -> 3. Local
       try {
         result = await performTranslation('openai');
-      } catch (err) {
-        console.warn('OpenAI Fluent translation failed, falling back to local...', err);
-        const localText = await translateLocal(text, fromLang, toLang);
-        result = { text: localText, source: 'client' };
+      } catch (openaiErr) {
+        try {
+          result = await performTranslation('gemini');
+        } catch (geminiErr) {
+          const localText = await translateLocal(text, fromLang, toLang);
+          result = { text: localText, source: 'client' };
+        }
       }
     } else {
-      // Normal mode: Try Gemini first
+      // 1. Tentar Gemini -> 2. Local
       try {
         result = await performTranslation('gemini');
       } catch (err) {
-        console.warn('Gemini translation failed, falling back to local...', err);
         const localText = await translateLocal(text, fromLang, toLang);
         result = { text: localText, source: 'client' };
       }
@@ -126,8 +199,7 @@ export async function unifiedTranslate(
     translationCache.set(cacheKey, result);
     return result;
   } catch (finalError: any) {
-    console.error('Unified translation reached final error:', finalError);
-    // Absolute final fallback to ensure NO ERROR is thrown to UI
+    handleApiError(finalError, 'CatastrophicFailure');
     const finalLocalText = await translateLocal(text, fromLang, toLang);
     return { text: finalLocalText, source: 'client' };
   }

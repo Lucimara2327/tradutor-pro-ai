@@ -53,19 +53,11 @@ export async function translateText(
         throw new Error('EMPTY_RESPONSE');
       }
 
-      // Length validation
-      const originalWords = text.trim().split(/\s+/).length;
-      const translatedWords = translated.split(/\s+/).length;
-
-      if (originalWords > 5 && translatedWords < 2 && retryCount < 2) {
-        return await attempt(retryCount + 1);
-      }
-
       return translated;
     } catch (error: any) {
       if (retryCount < 1) return await attempt(retryCount + 1);
       
-      console.error('Translation error:', error);
+      console.error('OpenAI attempt failed:', error.message || error);
       
       if (error.status === 401) {
         throw new Error('INVALID_KEY');

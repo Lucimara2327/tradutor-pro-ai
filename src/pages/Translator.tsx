@@ -683,39 +683,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       </div>
 
       <div className="space-y-6">
-        {/* Mensagem de Erro com Reparo */}
-        <AnimatePresence>
-          {error && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="p-6 rounded-3xl glass-card bg-red-500/10 border-red-500/20 text-red-500 text-sm font-bold flex flex-col gap-4 shadow-lg shadow-red-500/5 transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <AlertCircle size={20} className="shrink-0" />
-                <span>{error}</span>
-              </div>
-              
-              {error.includes('OpenAI') && (
-                <button 
-                  onClick={() => {
-                    setSettings(prev => ({ 
-                      ...prev, 
-                      engine: 'gemini', 
-                      model: 'gemini-1.5-flash' 
-                    }));
-                    setError(null);
-                  }}
-                  className="w-full py-4 bg-red-500 text-white rounded-2xl active:scale-[0.98] transition-all text-xs uppercase tracking-widest font-black shadow-lg shadow-red-500/20"
-                >
-                  Alternar para Motor Gemini (Gratuito)
-                </button>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Resultado */}
         <AnimatePresence mode="wait">
           {isLoading ? (

@@ -31,7 +31,7 @@ export async function speakWithGemini(
   
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "models/gemini-1.5-flash",
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: [Modality.AUDIO],
@@ -66,7 +66,7 @@ export async function translateWithGemini(
   async function attempt(retryCount = 0): Promise<string> {
     try {
       const ai = getGeminiClient(apiKey);
-      const model = "gemini-1.5-flash";
+      const model = "models/gemini-1.5-flash";
 
       const fluentRules = `
 Regras do MODO FLUENTE ATIVADO:
@@ -98,26 +98,36 @@ ${text}` }] }],
         throw new Error('EMPTY_RESPONSE');
       }
 
-      // Length validation
-      const originalWords = text.trim().split(/\s+/).length;
-      const translatedWords = translated.split(/\s+/).length;
-
-      if (originalWords > 5 && translatedWords < 2 && retryCount < 2) {
-        return await attempt(retryCount + 1);
-      }
-
       return translated;
     } catch (error: any) {
       if (retryCount < 1) return await attempt(retryCount + 1);
-      console.warn('Gemini inner translation attempt failed:', error.message || error);
-      throw error;
+      
+      let errorMsg = error.message || String(error);
+      try {
+        // Many Gemini errors are returned as JSON strings
+        if (typeof errorMsg === 'string' && errorMsg.startsWith('{')) {
+          const parsed = JSON.parse(errorMsg);
+          errorMsg = parsed.error?.message || parsed.message || errorMsg;
+        }
+      } catch (e) {
+        // Not JSON, keep original
+      }
+
+      console.error('Gemini attempt failed:', errorMsg);
+      
+      // Throw normalized error for the orchestrator
+      if (errorMsg.includes('API key not valid')) throw new Error('INVALID_KEY');
+      if (errorMsg.includes('quota exceeded')) throw new Error('RATE_LIMIT');
+      if (errorMsg.includes('not found')) throw new Error('MODEL_NOT_FOUND');
+      
+      throw new Error(errorMsg);
     }
   }
 
   try {
     return await attempt();
   } catch (error: any) {
-    console.error('Gemini translation catastrophic failure:', error);
+    console.error('Gemini catastrophic failure:', error);
     throw error;
   }
 }

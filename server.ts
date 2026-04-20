@@ -66,13 +66,12 @@ async function startServer() {
           }
 
           const ai = new GoogleGenAI({ apiKey });
-          // Strict model enforcement
-          const geminiModel = "gemini-1.5-flash";
+          const geminiModel = "models/gemini-1.5-flash";
 
           const originContext = fromLang === 'auto' ? 'Idioma detectado automaticamente' : `Idioma: ${fromLang}`;
           const destContext = `Idioma de destino: ${toLang}`;
 
-          const prompt = `Você é um tradutor profissional multilíngue. Traduza o texto abaixo fielmente.
+          const promptText = `Você é um tradutor profissional multilíngue. Traduza o texto abaixo fielmente.
 Mantenha o tom, o sentido e a formatação originais. Não omita partes importantes. Retorne APENAS o texto traduzido.
 
 Contexto:
@@ -84,7 +83,7 @@ ${text}`;
 
           const response = await ai.models.generateContent({
             model: geminiModel,
-            contents: [{ parts: [{ text: prompt }] }],
+            contents: [{ parts: [{ text: promptText }] }],
             config: {
               temperature: 0.2,
             }
@@ -93,15 +92,6 @@ ${text}`;
           translated = response.text?.trim() || '';
         } else {
           throw new Error('Invalid engine');
-        }
-
-        // Basic validation: If original is long but translation is just 1-2 words, something is wrong
-        const originalWords = text.trim().split(/\s+/).length;
-        const translatedWords = translated.split(/\s+/).length;
-
-        if (originalWords > 5 && translatedWords < 2 && retryCount < 2) {
-          console.warn(`Translation seems suspiciously short (${translatedWords} vs ${originalWords} words). Retrying...`);
-          return await attemptTranslation(retryCount + 1);
         }
 
         return translated;
@@ -113,19 +103,21 @@ ${text}`;
 
     try {
       const translatedText = await attemptTranslation();
+      if (!translatedText || translatedText.trim() === "" || translatedText === text) {
+        throw new Error('SERVER_INVALID_RESPONSE');
+      }
       return res.json({ translatedText });
     } catch (error: any) {
       console.error('Server translation error:', error);
       
-      const errorMsg = error.message || '';
+      const errorMsg = error.message || String(error);
       const isInvalidKey = errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_KEY') || error.status === 401;
-      const isConfigError = errorMsg.includes('NOT_CONFIGURED') || isInvalidKey;
+      const isRateLimit = errorMsg.includes('quota exceeded') || errorMsg.includes('Rate limit') || error.status === 429;
       
-      res.status(isInvalidKey ? 401 : 500).json({ 
-        error: isInvalidKey ? 'Chave API do servidor inválida' : (error.message || 'Translation failed'),
+      res.status(isInvalidKey ? 401 : (isRateLimit ? 429 : 500)).json({ 
+        error: errorMsg,
         source: 'server',
-        code: isInvalidKey ? 'INVALID_KEY' : 'SERVER_ERROR',
-        details: errorMsg
+        code: isInvalidKey ? 'INVALID_KEY' : (isRateLimit ? 'RATE_LIMIT' : 'SERVER_ERROR')
       });
     }
   });
