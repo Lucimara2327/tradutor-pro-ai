@@ -29,23 +29,40 @@ export async function translateText(
   async function attempt(retryCount = 0): Promise<string> {
     try {
       const isFluent = !!fluentMode;
-      const fluentPrompt = `Translate the following text from ${fromLang === 'auto' ? 'source language' : fromLang} to ${toLang} in a natural, fluent and human-like way. Do not translate word by word. Adapt the sentence as a native speaker would say it. Use ONLY the translated text in the response.`;
+
+      const normalPrompt = `Você é um tradutor profissional. Sua tarefa é traduzir o texto de forma DIRETA, LITERAL e FIEL. 
+REGRAS:
+- PRIORIDADE: Sempre priorize a tradução literal.
+- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
+- NÃO interprete o texto.
+- NÃO adicione palavras ou explicações.
+- Mantenha a estrutura exata da frase original.
+- Responda APENAS com a tradução.
+Idioma de destino: ${toLang}`;
+
+      const fluentPrompt = `Você é um tradutor profissional. Sua tarefa é traduzir o texto de forma NATURAL e FLUIDA, mas mantendo a FIDELIDADE ABSOLUTA ao significado original.
+REGRAS:
+- PRIORIDADE: Priorize a fidelidade à tradução literal antes da fluidez.
+- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
+- NÃO reformule o sentido.
+- NÃO invente frases ou adicione palavras (como "querido", "amigo", etc).
+- Ajuste apenas a gramática e concordância para soar natural no idioma de destino.
+- Responda APENAS com a tradução.
+Idioma de destino: ${toLang}`;
 
       const response = await client.chat.completions.create({
         model: model,
         messages: [
           {
             role: 'system',
-            content: isFluent 
-              ? fluentPrompt
-              : `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma precisa e direta. Mantenha a integridade total do texto original. Responda APENAS com a tradução, sem explicações.`
+            content: isFluent ? fluentPrompt : normalPrompt
           },
           {
             role: 'user',
             content: text,
           },
         ],
-        temperature: isFluent ? 0.7 : 0.2,
+        temperature: isFluent ? 0.3 : 0.1,
       });
 
       const translated = response.choices[0]?.message?.content?.trim();

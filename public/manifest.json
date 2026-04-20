@@ -1,11 +1,11 @@
 {
-  "name": "Tradutor Pro AI",
-  "short_name": "Tradutor",
-  "start_url": "/tradutor-pro-ai/",
-  "scope": "/tradutor-pro-ai/",
+  "name": "Lumi Translate",
+  "short_name": "Lumi",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0f172a",
-  "theme_color": "#7c3aed",
+  "theme_color": "#7B3FE4",
   "description": "Tradução profissional com Inteligência Artificial.",
   "icons": [
     {

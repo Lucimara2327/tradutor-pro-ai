@@ -350,7 +350,7 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
           <div className="glass-card p-6 bg-gradient-to-br from-[#7B3FE4] to-[#3F8EFC] text-white border-none shadow-xl relative overflow-hidden group">
             <div className="relative z-10 flex flex-col gap-4">
               <div className="space-y-1">
-                <h4 className="text-lg font-black tracking-tight">Tradutor Pro na Tela Inicial</h4>
+                <h4 className="text-lg font-black tracking-tight">Lumi Translate na Tela Inicial</h4>
                 <p className="text-[10px] font-bold uppercase tracking-wider opacity-80 decoration-white/30 underline decoration-dashed transition-all">
                   Instale como um app nativo para acesso instantâneo
                 </p>

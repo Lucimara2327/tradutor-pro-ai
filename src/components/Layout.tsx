@@ -20,7 +20,7 @@ export default function Layout() {
             <Languages size={24} />
           </div>
           <h1 className="text-xl font-bold tracking-tight">
-            Tradutor <span className="gradient-text">Pro AI</span>
+            Lumi <span className="gradient-text">Translate</span>
           </h1>
         </div>
 
@@ -49,7 +49,7 @@ export default function Layout() {
              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7B3FE4] to-[#3F8EFC] flex items-center justify-center text-white">
                <Languages size={18} />
              </div>
-             <span className="font-bold text-lg">Tradutor Pro</span>
+             <span className="font-bold text-lg">Lumi Translate</span>
           </div>
           
           <div className="hidden lg:flex items-center gap-8">

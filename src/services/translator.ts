@@ -120,11 +120,25 @@ export async function unifiedTranslate(
     return translationCache.get(cacheKey)!;
   }
 
-  // 7. VALIDAÇÃO DE RESPOSTA (isValid)
-  const isValid = (translated: string | null | undefined): boolean => {
+  // 7. VALIDAÇÃO DE RESPOSTA (isValidTranslation)
+  const isValidTranslation = (original: string, translated: string | null | undefined): boolean => {
     if (!translated || translated.trim() === "") return false;
-    // Se texto > 3 caracteres, não pode ser igual ao original
-    if (text.length > 3 && translated.trim().toLowerCase() === text.trim().toLowerCase()) return false;
+    const cleanOrig = original.trim().toLowerCase();
+    const cleanTrans = translated.trim().toLowerCase();
+
+    // 1. Proibir frases iguais ao original (para textos longos)
+    if (original.length > 3 && cleanOrig === cleanTrans) return false;
+
+    // 2. Proibir explicações comuns da IA
+    const hallucinations = ['here is the translation', 'tradução:', 'the translation is', 'translated to', 'claro, aqui está', 'tradução fiel:'];
+    if (hallucinations.some(h => cleanTrans.includes(h))) return false;
+
+    // 3. Validação de Comprimento Heurística
+    if (original.length > 20) {
+       const ratio = translated.length / original.length;
+       if (ratio < 0.2 || ratio > 5) return false;
+    }
+
     return true;
   };
 
@@ -140,7 +154,7 @@ export async function unifiedTranslate(
 
       if (response.ok) {
         const data = await response.json();
-        if (data.translatedText && isValid(data.translatedText)) {
+        if (data.translatedText && isValidTranslation(text, data.translatedText)) {
           return { text: data.translatedText, source: 'server' };
         }
       }
@@ -159,7 +173,7 @@ export async function unifiedTranslate(
           resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, fluentMode), 15000);
         }
 
-        if (isValid(resultText)) {
+        if (isValidTranslation(text, resultText)) {
           return { text: resultText, source: 'client' };
         }
         throw new Error('CLIENT_INVALID_OR_EMPTY');

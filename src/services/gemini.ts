@@ -68,28 +68,37 @@ export async function translateWithGemini(
       const ai = getGeminiClient(apiKey);
       const model = "models/gemini-1.5-flash";
 
+      const normalRules = `
+REGRAS (MODO NORMAL):
+- PRIORIDADE: Sempre priorize a tradução literal.
+- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
+- Tradução DIRETA, LITERAL e CORRETA.
+- Manter a estrutura da frase original.
+- NÃO interpretar, NÃO reformular, NÃO adicionar palavras.`;
+
       const fluentRules = `
-Regras do MODO FLUENTE ATIVADO:
-- Gere uma tradução NATURAL, como um falante nativo escreveria.
-- Não traduza palavra por palavra; foque no contexto e na fluidez.
-- Ajuste a gramática e a estrutura da frase para soar humana e idiomática.
-- Mantenha o nível de formalidade (casual, profissional ou neutro) do original, mas adaptado culturalmente.
-- Se for uma expressão idiomática, use a equivalente no idioma de destino.`;
+REGRAS (MODO FLUENTE):
+- PRIORIDADE: Priorize a fidelidade à tradução literal antes da fluidez.
+- AMBIGUIDADE: Se houver ambiguidade, escolha o significado mais comum.
+- Tradução NATURAL e FLUIDA.
+- FIDELIDADE ABSOLUTA ao significado e intenção original.
+- Ajuste apenas gramática e concordância.
+- NÃO invente frases, NÃO adicione palavras extras (como "querido", "amigo", etc).`;
+
+      const prompt = `Você é um tradutor profissional. Traduza de ${fromLang === 'auto' ? 'detectado' : fromLang} para ${toLang}.
+${fluentMode ? fluentRules : normalRules}
+
+Proibido: responder como chat, fazer perguntas, explicações ou aspas.
+Retorne APENAS o texto traduzido.
+
+Texto original:
+${text}`;
 
       const response = await ai.models.generateContent({
         model: model,
-        contents: [{ parts: [{ text: `Você é um tradutor profissional multilíngue. Traduza o texto abaixo ${fluentMode ? 'de forma FLUENTE e NATURAL' : 'fielmente'} para o idioma de destino.
-${fluentMode ? fluentRules : 'Mantenha o tom, o sentido e a formatação originais. Não omita partes do texto.'}
-Retorne APENAS o texto traduzido.
-
-Contexto:
-${fromLang === 'auto' ? 'Idioma detectado automaticamente' : `Idioma de origem: ${fromLang}`}
-Idioma de destino: ${toLang}
-
-Texto original:
-${text}` }] }],
+        contents: [{ parts: [{ text: prompt }] }],
         config: {
-          temperature: fluentMode ? 0.7 : 0.2,
+          temperature: fluentMode ? 0.3 : 0.1,
         }
       });
 
