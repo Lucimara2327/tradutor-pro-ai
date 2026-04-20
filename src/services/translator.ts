@@ -16,8 +16,8 @@ export function checkCache(
   toLang: string,
   settings: AppSettings
 ): TranslationResult | null {
-  const { engine, model } = settings;
-  const cacheKey = `${engine}-${model}-${fromLang}-${toLang}-${text}`;
+  const { engine, model, fluentMode } = settings;
+  const cacheKey = `${engine}-${model}-${fluentMode}-${fromLang}-${toLang}-${text}`;
   return translationCache.get(cacheKey) || null;
 }
 
@@ -27,8 +27,8 @@ export async function unifiedTranslate(
   toLang: string,
   settings: AppSettings
 ): Promise<TranslationResult> {
-  const { engine, model, geminiApiKey, openaiApiKey } = settings;
-  const cacheKey = `${engine}-${model}-${fromLang}-${toLang}-${text}`;
+  const { engine, model, geminiApiKey, openaiApiKey, fluentMode } = settings;
+  const cacheKey = `${engine}-${model}-${fluentMode}-${fromLang}-${toLang}-${text}`;
 
   // Check Cache first
   if (translationCache.has(cacheKey)) {
@@ -40,7 +40,7 @@ export async function unifiedTranslate(
     const response = await fetch('/api/translate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, fromLang, toLang, engine, model })
+      body: JSON.stringify({ text, fromLang, toLang, engine, model, fluentMode })
     });
 
     const data = await response.json();
@@ -72,12 +72,12 @@ export async function unifiedTranslate(
   let resultText = '';
   if (engine === 'gemini') {
     // Ensure we don't pass an OpenAI model to Gemini
-    const geminiModel = model.startsWith('gpt') ? 'gemini-3-flash-preview' : model;
-    resultText = await translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel);
+    const geminiModel = model.startsWith('gpt') ? 'gemini-1.5-flash' : model;
+    resultText = await translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, fluentMode);
   } else {
     // Ensure we don't pass a Gemini model to OpenAI
     const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
-    resultText = await translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel);
+    resultText = await translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, fluentMode);
   }
 
   const finalResult: TranslationResult = { text: resultText, source: 'client' };
@@ -91,6 +91,6 @@ export async function unifiedSpeak(
   voiceName: 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr' = 'Kore'
 ): Promise<string> {
   // Currently only Gemini supports TTS in our implementation
-  // We can add OpenAI TTS (OpenAI Audio API) here in the future
+  // Ensure we use a valid model name for multimodal TTS
   return speakWithGemini(text, settings.geminiApiKey, voiceName);
 }

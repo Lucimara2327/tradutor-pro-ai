@@ -530,6 +530,31 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           </button>
         </div>
       </div>
+    
+      {/* Opção Modo Fluente */}
+      <div className="flex items-center justify-end px-2">
+        <button
+          onClick={() => setSettings(prev => ({ ...prev, fluentMode: !prev.fluentMode }))}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-bold text-xs uppercase tracking-widest",
+            settings.fluentMode 
+              ? "bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400 shadow-sm shadow-purple-500/5" 
+              : "bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500"
+          )}
+        >
+          <Sparkles size={14} className={cn(settings.fluentMode && "animate-pulse")} />
+          <span>Modo Fluente {settings.fluentMode ? 'Ativado' : 'Desativado'}</span>
+          <div className={cn(
+            "w-8 h-4 rounded-full relative transition-all ml-1",
+            settings.fluentMode ? "bg-purple-500" : "bg-slate-300 dark:bg-zinc-700"
+          )}>
+            <div className={cn(
+              "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all",
+              settings.fluentMode ? "left-4.5" : "left-0.5"
+            )} />
+          </div>
+        </button>
+      </div>
 
       {/* 2. MEIO: Caixa de texto */}
       <div className="space-y-4">
@@ -758,7 +783,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                       "w-1.5 h-1.5 rounded-full animate-pulse",
                       translationSource === 'server' ? "bg-green-500" : "bg-orange-500"
                     )} />
-                    <span>Processado via {settings.engine.toUpperCase()} • {translationSource === 'server' ? 'SEGURO' : 'LOCAL'}</span>
+                    <span>Processado via {settings.engine.toUpperCase()} • {translationSource === 'server' ? 'SEGURO' : 'MODO OFFLINE'}</span>
                  </div>
                  <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest hidden sm:block">
                    ID: {Math.random().toString(36).substring(7).toUpperCase()}

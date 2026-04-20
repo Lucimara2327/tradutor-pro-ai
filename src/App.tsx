@@ -35,8 +35,9 @@ export default function App() {
       geminiApiKey: '',
       theme: 'light',
       autoPlayAudio: false,
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       engine: 'gemini',
+      fluentMode: true,
     };
     
     if (saved) {
@@ -44,7 +45,13 @@ export default function App() {
       // Migration: insure engine exists and model is compatible
       if (!parsed.engine) {
         parsed.engine = 'gemini';
-        parsed.model = 'gemini-3-flash-preview';
+        parsed.model = 'gemini-1.5-flash';
+      }
+      if (parsed.fluentMode === undefined) {
+        parsed.fluentMode = true;
+      }
+      if (parsed.model === 'gemini-3-flash-preview' || parsed.model === 'gemini-1.5-flash-latest') {
+        parsed.model = 'gemini-1.5-flash';
       }
       if (parsed.geminiApiKey === undefined) {
         parsed.geminiApiKey = '';

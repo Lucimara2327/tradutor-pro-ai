@@ -21,28 +21,36 @@ export async function translateText(
   fromLang: string,
   toLang: string,
   apiKey: string,
-  model: string = 'gpt-4o-mini'
+  model: string = 'gpt-4o-mini',
+  fluentMode: boolean = false
 ): Promise<string> {
   const client = getOpenAIClient(apiKey);
 
   async function attempt(retryCount = 0): Promise<string> {
     try {
+      const isFluent = !!fluentMode;
+      const fluentPrompt = `
+Regras do MODO FLUENTE ATIVADO:
+- Gere uma tradução NATURAL, como um falante nativo escreveria.
+- Não traduza palavra por palavra; foque no contexto e na fluidez.
+- Ajuste a gramática e a estrutura da frase para soar humana e idiomática.
+- Mantenha o nível de formalidade do original, mas adaptado culturalmente.
+- Use APENAS o texto traduzido na resposta.`;
+
       const response = await client.chat.completions.create({
         model: model,
         messages: [
           {
             role: 'system',
-            content: `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma natural e precisa. 
-Se o idioma de origem for 'auto', detecte-o automaticamente. 
-Mantenha a integridade total do texto original. 
-Responda APENAS com a tradução, sem explicações.`
+            content: `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma ${isFluent ? 'NATURAL, HUMANA e CONTEXTUAL (Modo Fluente)' : 'precisa e direta'}. 
+${isFluent ? fluentPrompt : "Mantenha a integridade total do texto original. Responda APENAS com a tradução, sem explicações."}`
           },
           {
             role: 'user',
             content: text,
           },
         ],
-        temperature: 0.2,
+        temperature: isFluent ? 0.7 : 0.2,
       });
 
       const translated = response.choices[0]?.message?.content?.trim();

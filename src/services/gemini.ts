@@ -31,7 +31,7 @@ export async function speakWithGemini(
   
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
+      model: "gemini-1.5-flash",
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: [Modality.AUDIO],
@@ -60,16 +60,25 @@ export async function translateWithGemini(
   fromLang: string,
   toLang: string,
   apiKey?: string,
-  model: string = 'gemini-3-flash-preview'
+  model: string = 'gemini-1.5-flash',
+  fluentMode: boolean = false
 ): Promise<string> {
   const ai = getGeminiClient(apiKey);
 
   async function attempt(retryCount = 0): Promise<string> {
     try {
+      const fluentRules = `
+Regras do MODO FLUENTE ATIVADO:
+- Gere uma tradução NATURAL, como um falante nativo escreveria.
+- Não traduza palavra por palavra; foque no contexto e na fluidez.
+- Ajuste a gramática e a estrutura da frase para soar humana e idiomática.
+- Mantenha o nível de formalidade (casual, profissional ou neutro) do original, mas adaptado culturalmente.
+- Se for uma expressão idiomática, use a equivalente no idioma de destino.`;
+
       const response = await ai.models.generateContent({
         model: model,
-        contents: `Você é um tradutor profissional multilíngue. Traduza o texto abaixo fielmente para o idioma de destino.
-Mantenha o tom, o sentido e a formatação originais. Não omita partes do texto.
+        contents: `Você é um tradutor profissional multilíngue. Traduza o texto abaixo ${fluentMode ? 'de forma FLUENTE e NATURAL' : 'fielmente'} para o idioma de destino.
+${fluentMode ? fluentRules : 'Mantenha o tom, o sentido e a formatação originais. Não omita partes do texto.'}
 Retorne APENAS o texto traduzido.
 
 Contexto:
@@ -79,7 +88,7 @@ Idioma de destino: ${toLang}
 Texto original:
 ${text}`,
         config: {
-          temperature: 0.2,
+          temperature: fluentMode ? 0.7 : 0.2,
         }
       });
 
