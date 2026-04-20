@@ -60,6 +60,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const recognitionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const currentSpeechIdRef = useRef<number>(0);
 
   // Persistence effect
   useEffect(() => {
@@ -77,30 +78,13 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     };
   }, []);
 
-  // Auto-translation debounce
+  // Clear translation if input is empty
   useEffect(() => {
     if (!inputText.trim()) {
       setTranslatedText('');
       lastInputRef.current = '';
-      return;
     }
-
-    const timer = setTimeout(() => {
-      if (inputText.trim() && !isLoading && !isProcessingOCR) {
-        // Check cache for instant update
-        const cached = checkCache(inputText.trim(), fromLang, toLang, settings);
-        if (cached) {
-          setTranslatedText(cached.text);
-          setTranslationSource(cached.source);
-          lastInputRef.current = `${inputText.trim()}-${fromLang}-${toLang}-${settings.engine}-${settings.model}`;
-          return;
-        }
-        handleTranslate();
-      }
-    }, 800); // More aggressive debounce (0.8s)
-
-    return () => clearTimeout(timer);
-  }, [inputText, fromLang, toLang, settings.engine, settings.model]);
+  }, [inputText]);
 
   const stopGeminiAudio = () => {
     if (currentAudioSourceRef.current) {
@@ -279,16 +263,25 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   const speak = async (text: string, langCode: string) => {
+    // 1. Cancel everything immediately
     window.speechSynthesis.cancel();
     stopGeminiAudio();
     if (!text) return;
 
+    // 2. Track this request
+    const speechId = ++currentSpeechIdRef.current;
     setIsSpeaking(true);
 
     try {
-      // Try high-quality Gemini TTS
+      // 3. Try high-quality Gemini TTS (async fetch)
       const base64Data = await unifiedSpeak(text, settings);
       
+      // 4. Critical check: did someone request a different audio while we were fetching?
+      if (speechId !== currentSpeechIdRef.current) {
+        console.log('Aborting play: newer speech request detected');
+        return;
+      }
+
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       }
@@ -317,14 +310,19 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       gainNode.connect(audioContextRef.current.destination);
       
       source.onended = () => {
-        setIsSpeaking(false);
-        currentAudioSourceRef.current = null;
+        if (speechId === currentSpeechIdRef.current) {
+            setIsSpeaking(false);
+            currentAudioSourceRef.current = null;
+        }
       };
       
       currentAudioSourceRef.current = source;
       source.start();
 
     } catch (error) {
+      // 5. Final fallback check
+      if (speechId !== currentSpeechIdRef.current) return;
+
       console.warn('Gemini TTS failed, falling back to system TTS', error);
       // System Fallback
       const utterance = new SpeechSynthesisUtterance(text);
@@ -335,10 +333,11 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       
       // User requested properties: suave, natural e agradável
       utterance.volume = 0.7;
-      utterance.rate = 0.9;
+      utterance.rate = 1.05;
       utterance.pitch = 1.0;
 
       // Select better voice
+      // Pre-fetching voices often reduces initial delay
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {
         // Try to find a high-quality/natural voice for the target language
@@ -352,9 +351,15 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         }
       }
 
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onstart = () => {
+        if (speechId === currentSpeechIdRef.current) setIsSpeaking(true);
+      };
+      utterance.onend = () => {
+        if (speechId === currentSpeechIdRef.current) setIsSpeaking(false);
+      };
+      utterance.onerror = () => {
+        if (speechId === currentSpeechIdRef.current) setIsSpeaking(false);
+      };
       window.speechSynthesis.speak(utterance);
     }
   };
@@ -591,35 +596,22 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
             </div>
           )}
 
-          <div className="absolute bottom-6 right-6 flex items-center gap-2">
+          <div className="absolute bottom-6 right-6 flex items-center gap-3">
             <button 
               onClick={handlePaste}
-              className="p-3 bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4] rounded-2xl hover:scale-105 active:scale-95 transition-all border border-slate-200 dark:border-white/10 shadow-sm"
+              className="p-3.5 bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4] rounded-2xl hover:scale-105 active:scale-95 transition-all border border-slate-200 dark:border-white/10 shadow-sm"
               title="Colar texto"
             >
               <ClipboardList size={20} />
             </button>
 
-            <button 
-              onClick={handleMic}
-              className={cn(
-                "p-4 rounded-2xl transition-all shadow-lg flex items-center justify-center border",
-                isListening 
-                  ? "bg-red-500 text-white border-red-400 animate-pulse scale-110" 
-                  : "bg-[#7B3FE4] text-white border-[#7B3FE4]/20 hover:scale-105"
-              )}
-              title={isListening ? "Parar gravação" : "Traduzir por voz"}
-            >
-              {isListening ? <MicOff size={22} className="animate-bounce" /> : <Mic size={22} />}
-            </button>
-
             {inputText && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button 
                   onClick={() => speak(inputText, fromLang)}
                   className={cn(
-                    "p-3 rounded-2xl transition-all shadow-sm active:scale-90",
-                    isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4]"
+                    "p-3.5 rounded-2xl transition-all shadow-sm active:scale-90",
+                    isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4] border border-slate-200 dark:border-white/10"
                   )}
                   title="Ouvir texto original"
                 >
@@ -627,7 +619,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                 </button>
                 <button 
                   onClick={handleClear}
-                  className="p-3 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
+                  className="p-3.5 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
                   title="Limpar"
                 >
                   <Trash2 size={20} />
@@ -656,13 +648,13 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         </div>
       </div>
 
-      {/* 4. PARTE INFERIOR: Botão Traduzir */}
-      <div className="space-y-6 pt-4">
+      {/* 4. PARTE INFERIOR: Traduzir */}
+      <div className="flex items-center gap-3 pt-4">
         <button
           onClick={handleTranslate}
           disabled={isLoading || !inputText.trim()}
           className={cn(
-            "primary-btn w-full h-16 flex items-center justify-center gap-3 text-lg shadow-2xl relative overflow-hidden active:scale-[0.97] transition-all",
+            "primary-btn flex-1 h-16 flex items-center justify-center gap-3 text-lg shadow-2xl relative overflow-hidden active:scale-[0.97] transition-all rounded-3xl",
             (isLoading || !inputText.trim()) && "brightness-90 saturate-50 opacity-60"
           )}
         >
@@ -681,7 +673,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           {/* Subtle reflection effect */}
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
         </button>
+      </div>
 
+      <div className="space-y-6">
         {/* Mensagem de Erro com Reparo */}
         <AnimatePresence>
           {error && (
