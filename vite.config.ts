@@ -8,7 +8,7 @@ export default defineConfig(({mode, command}) => {
   const isProduction = command === 'build';
   
   return {
-    base: isProduction ? '/tradutor-pro-ai/' : '/',
+    base: './',
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

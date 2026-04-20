@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Translator from './pages/Translator';
 import HistoryPage from './pages/History';
@@ -96,7 +96,7 @@ export default function App() {
   };
 
   return (
-    <BrowserRouter basename={(import.meta as any).env.BASE_URL}>
+    <HashRouter>
       <Routes>
         <Route element={<Layout />}>
           <Route index element={
@@ -131,6 +131,6 @@ export default function App() {
           } />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
