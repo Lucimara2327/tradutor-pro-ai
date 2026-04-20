@@ -50,7 +50,7 @@ export default function App() {
       if (parsed.fluentMode === undefined) {
         parsed.fluentMode = true;
       }
-      if (parsed.model === 'gemini-3-flash-preview' || parsed.model === 'gemini-1.5-flash-latest') {
+      if (parsed.model.includes('gemini')) {
         parsed.model = 'gemini-1.5-flash';
       }
       if (parsed.geminiApiKey === undefined) {

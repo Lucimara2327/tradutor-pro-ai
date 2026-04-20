@@ -185,23 +185,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
     lastInputRef.current = currentContext;
 
-    // Stop any playing audio
-    window.speechSynthesis.cancel();
-    stopGeminiAudio();
-
-    // Validate engine configuration
-    if (settings.engine === 'openai' && !settings.openaiApiKey) {
-      setError('A chave API OpenAI não foi configurada. Vá em Ajustes ou mude para o motor Gemini.');
-      setIsLoading(false);
-      return;
-    }
-
-    if (settings.engine === 'gemini' && !settings.geminiApiKey && !process.env.GEMINI_API_KEY) {
-      setError('Configure sua chave Gemini nas configurações');
-      setIsLoading(false);
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     window.speechSynthesis.cancel();
@@ -234,13 +217,12 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         speak(result.text, toLang);
       }
     } catch (err: any) {
-      const msg = err.message;
-      if (msg === 'INVALID_KEY') setError('Chave API inválida. Verifique seus Ajustes.');
-      else if (msg === 'EMPTY_RESPONSE') setError('A IA retornou uma resposta vazia. Tente novamente com um texto mais claro.');
-      else if (msg === 'RATE_LIMIT_OR_CREDITS') setError('Limite atingido ou créditos insuficientes. Tente o motor Gemini nos Ajustes.');
-      else if (msg === 'NO_CONNECTION') setError('Sem conexão com a internet. Verifique seu sinal.');
-      else if (msg.includes('sobrecarregado')) setError(msg);
-      else setError('Ocorreu um problema ao traduzir: ' + (msg || 'falha na comunicação com a IA'));
+      // Logic leaks: unifiedTranslate already returns a fallback, 
+      // but if something catastrophic happens during result processing:
+      console.error('Catastrophic translation error handled:', err);
+      // Ensure we don't leave the user hanging
+      setTranslatedText(inputText);
+      setTranslationSource('client');
     } finally {
       setIsLoading(false);
     }
@@ -721,7 +703,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                     setSettings(prev => ({ 
                       ...prev, 
                       engine: 'gemini', 
-                      model: 'gemini-3-flash-preview' 
+                      model: 'gemini-1.5-flash' 
                     }));
                     setError(null);
                   }}

@@ -55,7 +55,7 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
           <button 
             onClick={() => {
               updateSetting('engine', 'gemini');
-              updateSetting('model', 'gemini-3-flash-preview');
+              updateSetting('model', 'gemini-1.5-flash');
             }}
             className={cn(
               "p-6 rounded-3xl glass-card flex flex-col gap-4 transition-all duration-300 border bg-white dark:bg-zinc-900/40 relative overflow-hidden",
@@ -118,22 +118,13 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
           {settings.engine === 'gemini' ? (
             <>
               <button 
-                onClick={() => updateSetting('model', 'gemini-3-flash-preview')}
+                onClick={() => updateSetting('model', 'gemini-1.5-flash')}
                 className={cn(
                   "flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
-                  settings.model === 'gemini-3-flash-preview' ? "bg-purple-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                  settings.model === 'gemini-1.5-flash' ? "bg-purple-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-600 dark:hover:text-white"
                 )}
               >
-                Gemini 3 Flash
-              </button>
-              <button 
-                onClick={() => updateSetting('model', 'gemini-3.1-pro-preview')}
-                className={cn(
-                  "flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
-                  settings.model === 'gemini-3.1-pro-preview' ? "bg-purple-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                )}
-              >
-                Gemini 3.1 Pro
+                Gemini 1.5 Flash (Estável)
               </button>
             </>
           ) : (
@@ -329,7 +320,7 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
         <h3 className="text-[10px] font-black uppercase tracking-[3px] text-slate-500 ml-2">Capacidade de Processamento</h3>
         <div className="grid grid-cols-2 gap-4">
           {(settings.engine === 'gemini' 
-            ? ['gemini-3-flash-preview', 'gemini-3.1-pro-preview'] 
+            ? ['gemini-1.5-flash'] 
             : ['gpt-4o-mini', 'gpt-4o']
           ).map(model => (
             <button
@@ -339,10 +330,11 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
                 "p-5 rounded-2xl border-2 transition-all font-black text-[10px] tracking-[2px] uppercase",
                 settings.model === model 
                   ? (settings.engine === 'gemini' ? "border-[#7B3FE4] bg-[#7B3FE4]/10 text-[#7B3FE4]" : "border-[#3F8EFC] bg-[#3F8EFC]/10 text-[#3F8EFC]")
-                  : "border-slate-100 dark:border-white/5 bg-white/20 dark:bg-zinc-900/40 text-slate-400 hover:border-slate-200 dark:hover:border-white/10"
+                  : "border-slate-100 dark:border-white/5 bg-white/20 dark:bg-zinc-900/40 text-slate-400 hover:border-slate-200 dark:hover:border-white/10",
+                settings.engine === 'gemini' && "col-span-2"
               )}
             >
-              {model.replace('-preview', '').replace('gpt-', 'GPT ')}
+              {model === 'gemini-1.5-flash' ? 'Gemini 1.5 Flash' : model.replace('gpt-', 'GPT ')}
             </button>
           ))}
         </div>

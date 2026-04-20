@@ -60,13 +60,14 @@ export async function translateWithGemini(
   fromLang: string,
   toLang: string,
   apiKey?: string,
-  model: string = 'gemini-1.5-flash',
+  _ignoredModel: string = 'gemini-1.5-flash',
   fluentMode: boolean = false
 ): Promise<string> {
-  const ai = getGeminiClient(apiKey);
-
   async function attempt(retryCount = 0): Promise<string> {
     try {
+      const ai = getGeminiClient(apiKey);
+      const model = "gemini-1.5-flash";
+
       const fluentRules = `
 Regras do MODO FLUENTE ATIVADO:
 - Gere uma tradução NATURAL, como um falante nativo escreveria.
@@ -77,7 +78,7 @@ Regras do MODO FLUENTE ATIVADO:
 
       const response = await ai.models.generateContent({
         model: model,
-        contents: `Você é um tradutor profissional multilíngue. Traduza o texto abaixo ${fluentMode ? 'de forma FLUENTE e NATURAL' : 'fielmente'} para o idioma de destino.
+        contents: [{ parts: [{ text: `Você é um tradutor profissional multilíngue. Traduza o texto abaixo ${fluentMode ? 'de forma FLUENTE e NATURAL' : 'fielmente'} para o idioma de destino.
 ${fluentMode ? fluentRules : 'Mantenha o tom, o sentido e a formatação originais. Não omita partes do texto.'}
 Retorne APENAS o texto traduzido.
 
@@ -86,7 +87,7 @@ ${fromLang === 'auto' ? 'Idioma detectado automaticamente' : `Idioma de origem: 
 Idioma de destino: ${toLang}
 
 Texto original:
-${text}`,
+${text}` }] }],
         config: {
           temperature: fluentMode ? 0.7 : 0.2,
         }
@@ -106,8 +107,9 @@ ${text}`,
       }
 
       return translated;
-    } catch (error) {
+    } catch (error: any) {
       if (retryCount < 1) return await attempt(retryCount + 1);
+      console.warn('Gemini inner translation attempt failed:', error.message || error);
       throw error;
     }
   }
@@ -115,7 +117,7 @@ ${text}`,
   try {
     return await attempt();
   } catch (error: any) {
-    console.error('Gemini translation error:', error);
+    console.error('Gemini translation catastrophic failure:', error);
     throw error;
   }
 }

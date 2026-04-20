@@ -28,29 +28,52 @@ async function startServer() {
 
         let translated = '';
 
-        if (engine === 'gemini') {
+        if (engine === 'openai' || (isFluent && engine === 'gemini')) {
+          const apiKey = process.env.OPENAI_API_KEY;
+          // If in fluent mode but no OpenAI key, we might want to throw or fallback later
+          // For now, let's try OpenAI if it's fluent or explicitly selected
+          if (!apiKey) {
+            throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
+          }
+
+          const openai = new OpenAI({ apiKey });
+          const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
+
+          const fluentPrompt = `Translate the following text from ${fromLang === 'auto' ? 'source language' : fromLang} to ${toLang} in a natural, fluent and human-like way. Do not translate word by word. Adapt the sentence as a native speaker would say it. Use ONLY the translated text in the response.`;
+
+          const response = await openai.chat.completions.create({
+            model: openaiModel,
+            messages: [
+              {
+                role: 'system',
+                content: isFluent 
+                  ? fluentPrompt 
+                  : `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma precisa e direta. Mantenha a integridade total do texto original. Responda APENAS com a tradução, sem explicações.`
+              },
+              {
+                role: 'user',
+                content: text,
+              },
+            ],
+            temperature: isFluent ? 0.7 : 0.2,
+          });
+
+          translated = response.choices[0]?.message?.content?.trim() || '';
+        } else if (engine === 'gemini') {
           const apiKey = process.env.GEMINI_API_KEY;
           if (!apiKey) {
             throw new Error('GEMINI_API_KEY_NOT_CONFIGURED');
           }
 
           const ai = new GoogleGenAI({ apiKey });
-          const geminiModel = model?.startsWith('gpt') ? 'gemini-1.5-flash' : (model || 'gemini-1.5-flash');
+          // Strict model enforcement
+          const geminiModel = "gemini-1.5-flash";
 
           const originContext = fromLang === 'auto' ? 'Idioma detectado automaticamente' : `Idioma: ${fromLang}`;
           const destContext = `Idioma de destino: ${toLang}`;
 
-          const fluentRules = `
-Regras do MODO FLUENTE ATIVADO:
-- Gere uma tradução NATURAL, como um falante nativo escreveria.
-- Não traduza palavra por palavra; foque no contexto e na fluidez.
-- Ajuste a gramática e a estrutura da frase para soar humana e idiomática.
-- Mantenha o nível de formalidade (casual, profissional ou neutro) do original, mas adaptado culturalmente.
-- Se for uma expressão idiomática, use a equivalente no idioma de destino.`;
-
-          const prompt = `Você é um tradutor profissional multilíngue. Traduza o texto abaixo ${isFluent ? 'de forma FLUENTE e NATURAL' : 'fielmente'}.
-${isFluent ? fluentRules : 'Mantenha o tom, o sentido e a formatação originais.'}
-Não omita partes importantes. Retorne APENAS o texto traduzido.
+          const prompt = `Você é um tradutor profissional multilíngue. Traduza o texto abaixo fielmente.
+Mantenha o tom, o sentido e a formatação originais. Não omita partes importantes. Retorne APENAS o texto traduzido.
 
 Contexto:
 ${originContext}
@@ -63,45 +86,11 @@ ${text}`;
             model: geminiModel,
             contents: [{ parts: [{ text: prompt }] }],
             config: {
-              temperature: isFluent ? 0.7 : 0.2, // Higher temperature for more creative/natural flow
+              temperature: 0.2,
             }
           });
 
-          translated = response.text?.trim();
-        } else if (engine === 'openai') {
-          const apiKey = process.env.OPENAI_API_KEY;
-          if (!apiKey) {
-            throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
-          }
-
-          const openai = new OpenAI({ apiKey });
-          const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
-
-          const fluentPrompt = `
-Regras do MODO FLUENTE ATIVADO:
-- Gere uma tradução NATURAL, como um falante nativo escreveria.
-- Não traduza palavra por palavra; foque no contexto e na fluidez.
-- Ajuste a gramática e a estrutura da frase para soar humana e idiomática.
-- Mantenha o nível de formalidade do original, mas adaptado culturalmente.
-- Use APENAS o texto traduzido na resposta.`;
-
-          const response = await openai.chat.completions.create({
-            model: openaiModel,
-            messages: [
-              {
-                role: 'system',
-                content: `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma ${isFluent ? 'NATURAL, HUMANA e CONTEXTUAL (Modo Fluente)' : 'precisa e direta'}. 
-${isFluent ? fluentPrompt : "Mantenha a integridade total do texto original. Responda APENAS com a tradução, sem explicações."}`
-              },
-              {
-                role: 'user',
-                content: text,
-              },
-            ],
-            temperature: isFluent ? 0.7 : 0.2,
-          });
-
-          translated = response.choices[0]?.message?.content?.trim() || '';
+          translated = response.text?.trim() || '';
         } else {
           throw new Error('Invalid engine');
         }

@@ -29,21 +29,16 @@ export async function translateText(
   async function attempt(retryCount = 0): Promise<string> {
     try {
       const isFluent = !!fluentMode;
-      const fluentPrompt = `
-Regras do MODO FLUENTE ATIVADO:
-- Gere uma tradução NATURAL, como um falante nativo escreveria.
-- Não traduza palavra por palavra; foque no contexto e na fluidez.
-- Ajuste a gramática e a estrutura da frase para soar humana e idiomática.
-- Mantenha o nível de formalidade do original, mas adaptado culturalmente.
-- Use APENAS o texto traduzido na resposta.`;
+      const fluentPrompt = `Translate the following text from ${fromLang === 'auto' ? 'source language' : fromLang} to ${toLang} in a natural, fluent and human-like way. Do not translate word by word. Adapt the sentence as a native speaker would say it. Use ONLY the translated text in the response.`;
 
       const response = await client.chat.completions.create({
         model: model,
         messages: [
           {
             role: 'system',
-            content: `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma ${isFluent ? 'NATURAL, HUMANA e CONTEXTUAL (Modo Fluente)' : 'precisa e direta'}. 
-${isFluent ? fluentPrompt : "Mantenha a integridade total do texto original. Responda APENAS com a tradução, sem explicações."}`
+            content: isFluent 
+              ? fluentPrompt
+              : `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma precisa e direta. Mantenha a integridade total do texto original. Responda APENAS com a tradução, sem explicações.`
           },
           {
             role: 'user',
