@@ -13,22 +13,22 @@ interface SettingsPageProps {
 }
 
 export default function SettingsPage({ settings, setSettings, canInstall, onInstall }: SettingsPageProps) {
-  const [localKey, setLocalKey] = useState(settings.openaiApiKey);
+  const [localOpenAIKey, setLocalOpenAIKey] = useState(settings.openaiApiKey);
+  const [localGeminiKey, setLocalGeminiKey] = useState(settings.geminiApiKey);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [isKeyValid, setIsKeyValid] = useState<boolean | null>(null);
+  
+  const isOpenAIValid = localOpenAIKey.startsWith('sk-') && localOpenAIKey.length > 20;
+  const isGeminiValid = localGeminiKey.length > 20;
 
-  useEffect(() => {
-    if (settings.openaiApiKey) {
-      setIsKeyValid(settings.openaiApiKey.startsWith('sk-') && settings.openaiApiKey.length > 20);
-    }
-  }, [settings.openaiApiKey]);
-
-  const handleSaveKey = () => {
+  const handleSaveKeys = () => {
     setSaveStatus('saving');
     setTimeout(() => {
-      setSettings(prev => ({ ...prev, openaiApiKey: localKey }));
+      setSettings(prev => ({ 
+        ...prev, 
+        openaiApiKey: localOpenAIKey,
+        geminiApiKey: localGeminiKey
+      }));
       setSaveStatus('saved');
-      setIsKeyValid(localKey.startsWith('sk-') && localKey.length > 20);
       setTimeout(() => setSaveStatus('idle'), 2000);
     }, 800);
   };
@@ -166,41 +166,72 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-2 text-slate-500">
             <Key size={18} />
-            <h3 className="text-[10px] font-black uppercase tracking-[3px]">Configuração AI</h3>
+            <h3 className="text-[10px] font-black uppercase tracking-[3px]">Configuração de Chaves</h3>
           </div>
-          <AnimatePresence>
-            {isKeyValid !== null && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                  isKeyValid ? "bg-green-500/10 text-green-500 border border-green-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"
-                )}
-              >
-                {isKeyValid ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                <span>{isKeyValid ? 'Conectado' : 'Chave Inválida'}</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="flex gap-2">
+            <div className={cn(
+               "flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border",
+               isOpenAIValid ? "bg-green-500/10 text-green-500 border-green-500/20" : "bg-slate-500/10 text-slate-400 border-slate-500/10"
+            )}>
+              <span>OpenAI</span>
+            </div>
+            <div className={cn(
+               "flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border",
+               isGeminiValid ? "bg-purple-500/10 text-purple-500 border-purple-500/20" : "bg-slate-500/10 text-slate-400 border-slate-500/10"
+            )}>
+              <span>Gemini</span>
+            </div>
+          </div>
         </div>
         
-        <div className="glass-card p-6 space-y-5 bg-white/40 dark:bg-zinc-900/40 border-slate-200 dark:border-white/5 shadow-sm">
-          <p className="text-xs text-slate-500 font-medium leading-relaxed">
-            Utilizamos a infraestrutura da OpenAI para processar traduções de alta performance. Sua chave sk- permanece segura em seu armazenamento local.
-          </p>
-          
-          <div className="space-y-3">
-             <input 
-              type="password"
-              value={localKey}
-              onChange={(e) => setLocalKey(e.target.value)}
-              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="w-full h-14 px-5 rounded-2xl bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 focus:border-[#7B3FE4] outline-none transition-all font-mono text-sm shadow-inner"
-            />
+        <div className="glass-card p-6 space-y-6 bg-white/40 dark:bg-zinc-900/40 border-slate-200 dark:border-white/5 shadow-sm">
+          <div className="space-y-4">
+            {/* Gemini Key */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gemini API Key</label>
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[9px] text-purple-500 font-black hover:underline uppercase tracking-widest flex items-center gap-1"
+                >
+                  Obter Chave <ExternalLink size={8} />
+                </a>
+              </div>
+              <input 
+                type="password"
+                value={localGeminiKey}
+                onChange={(e) => setLocalGeminiKey(e.target.value)}
+                placeholder="Insira sua chave do Google AI Studio"
+                className="w-full h-12 px-5 rounded-xl bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 focus:border-[#7B3FE4] outline-none transition-all font-mono text-sm"
+              />
+            </div>
+
+            {/* OpenAI Key */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">OpenAI API Key</label>
+                <a 
+                  href="https://platform.openai.com/api-keys" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[9px] text-blue-500 font-black hover:underline uppercase tracking-widest flex items-center gap-1"
+                >
+                  Obter Chave <ExternalLink size={8} />
+                </a>
+              </div>
+              <input 
+                type="password"
+                value={localOpenAIKey}
+                onChange={(e) => setLocalOpenAIKey(e.target.value)}
+                placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                className="w-full h-12 px-5 rounded-xl bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 focus:border-[#3F8EFC] outline-none transition-all font-mono text-sm"
+              />
+            </div>
             
             <button 
-              onClick={handleSaveKey}
+              onClick={handleSaveKeys}
               disabled={saveStatus !== 'idle'}
               className={cn(
                 "w-full h-14 rounded-2xl font-black text-xs uppercase tracking-[2px] transition-all flex items-center justify-center gap-2",
@@ -212,31 +243,22 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
               ) : saveStatus === 'saved' ? (
                 <>
                   <CheckCircle2 size={18} />
-                  <span>Chave Salva</span>
+                  <span>Configurações Salvas</span>
                 </>
               ) : (
                 <>
                   <Save size={18} />
-                  <span>Salvar Chave API</span>
+                  <span>Salvar Chaves API</span>
                 </>
               )}
             </button>
           </div>
 
-          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-white/5">
+          <div className="pt-4 border-t border-slate-100 dark:border-white/5 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
               <ShieldCheck size={14} className="text-[#7B3FE4]" />
-              <span>LocalStorage Ativo</span>
+              <span>Armazenamento Local Seguro</span>
             </div>
-            <a 
-              href="https://platform.openai.com/api-keys" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] text-blue-500 font-black hover:underline uppercase tracking-widest"
-            >
-              <span>Get API Key</span>
-              <ExternalLink size={10} />
-            </a>
           </div>
         </div>
       </section>
@@ -302,22 +324,25 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
         </div>
       </section>
 
-      {/* Model Selection */}
+      {/* Model Selection Grid */}
       <section className="space-y-4">
-        <h3 className="text-[10px] font-black uppercase tracking-[3px] text-slate-500 ml-2">Neural Network Engine</h3>
+        <h3 className="text-[10px] font-black uppercase tracking-[3px] text-slate-500 ml-2">Capacidade de Processamento</h3>
         <div className="grid grid-cols-2 gap-4">
-          {['gpt-4o-mini', 'gpt-4o'].map(model => (
+          {(settings.engine === 'gemini' 
+            ? ['gemini-3-flash-preview', 'gemini-3.1-pro-preview'] 
+            : ['gpt-4o-mini', 'gpt-4o']
+          ).map(model => (
             <button
               key={model}
               onClick={() => updateSetting('model', model)}
               className={cn(
                 "p-5 rounded-2xl border-2 transition-all font-black text-[10px] tracking-[2px] uppercase",
                 settings.model === model 
-                  ? "border-[#7B3FE4] bg-[#7B3FE4]/10 text-[#7B3FE4] shadow-lg shadow-purple-500/10" 
+                  ? (settings.engine === 'gemini' ? "border-[#7B3FE4] bg-[#7B3FE4]/10 text-[#7B3FE4]" : "border-[#3F8EFC] bg-[#3F8EFC]/10 text-[#3F8EFC]")
                   : "border-slate-100 dark:border-white/5 bg-white/20 dark:bg-zinc-900/40 text-slate-400 hover:border-slate-200 dark:hover:border-white/10"
               )}
             >
-              {model}
+              {model.replace('-preview', '').replace('gpt-', 'GPT ')}
             </button>
           ))}
         </div>

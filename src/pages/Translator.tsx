@@ -18,8 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
-import { translateText } from '@/src/services/openai';
-import { translateWithGemini, speakWithGemini } from '@/src/services/gemini';
+import { unifiedTranslate, unifiedSpeak } from '@/src/services/translator';
 import { cn } from '@/src/lib/utils';
 
 interface TranslatorProps {
@@ -154,6 +153,13 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     // Validate engine configuration
     if (settings.engine === 'openai' && !settings.openaiApiKey) {
       setError('A chave API OpenAI não foi configurada. Vá em Ajustes ou mude para o motor Gemini.');
+      setIsLoading(false);
+      return;
+    }
+
+    if (settings.engine === 'gemini' && !settings.geminiApiKey && !process.env.GEMINI_API_KEY) {
+      setError('Configure sua chave Gemini nas configurações');
+      setIsLoading(false);
       return;
     }
 
@@ -163,24 +169,12 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     setIsSpeaking(false);
 
     try {
-      let result = '';
-      
-      if (settings.engine === 'gemini') {
-        result = await translateWithGemini(
-          inputText,
-          fromLang,
-          toLang,
-          settings.model.includes('gpt') ? 'gemini-3-flash-preview' : settings.model
-        );
-      } else {
-        result = await translateText(
-          inputText,
-          fromLang,
-          toLang,
-          settings.openaiApiKey,
-          settings.model.includes('gemini') ? 'gpt-4o-mini' : settings.model
-        );
-      }
+      const result = await unifiedTranslate(
+        inputText,
+        fromLang,
+        toLang,
+        settings
+      );
 
       setTranslatedText(result);
       
@@ -235,7 +229,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
     try {
       // Try high-quality Gemini TTS
-      const base64Data = await speakWithGemini(text);
+      const base64Data = await unifiedSpeak(text, settings);
       
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });

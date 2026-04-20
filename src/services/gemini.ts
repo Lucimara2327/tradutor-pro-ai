@@ -1,17 +1,22 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
 
-let geminiClient: any = null;
+let geminiClient: { client: any; key: string } | null = null;
 
-export function getGeminiClient(): any {
-  if (!geminiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY_MISSING');
-    }
-    geminiClient = new GoogleGenAI({ apiKey });
+export function getGeminiClient(key?: string): any {
+  const apiKey = key || process.env.GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('CONFIG_MISSING_KEY');
   }
-  return geminiClient;
+
+  if (!geminiClient || geminiClient.key !== apiKey) {
+    geminiClient = {
+      client: new GoogleGenAI({ apiKey }),
+      key: apiKey
+    };
+  }
+  return geminiClient.client;
 }
 
 /**
@@ -19,9 +24,10 @@ export function getGeminiClient(): any {
  */
 export async function speakWithGemini(
   text: string, 
+  apiKey?: string,
   voiceName: 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr' = 'Kore'
 ): Promise<string> {
-  const ai = getGeminiClient();
+  const ai = getGeminiClient(apiKey);
   
   try {
     const response = await ai.models.generateContent({
@@ -53,9 +59,10 @@ export async function translateWithGemini(
   text: string,
   fromLang: string,
   toLang: string,
+  apiKey?: string,
   model: string = 'gemini-3-flash-preview'
 ): Promise<string> {
-  const ai = getGeminiClient();
+  const ai = getGeminiClient(apiKey);
 
   try {
     const response = await ai.models.generateContent({

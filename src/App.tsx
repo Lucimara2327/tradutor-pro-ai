@@ -32,6 +32,7 @@ export default function App() {
     const saved = localStorage.getItem('translator_settings');
     const defaultSettings: AppSettings = {
       openaiApiKey: '',
+      geminiApiKey: '',
       theme: 'light',
       autoPlayAudio: false,
       model: 'gemini-3-flash-preview',
@@ -44,6 +45,9 @@ export default function App() {
       if (!parsed.engine) {
         parsed.engine = 'gemini';
         parsed.model = 'gemini-3-flash-preview';
+      }
+      if (parsed.geminiApiKey === undefined) {
+        parsed.geminiApiKey = '';
       }
       return { ...defaultSettings, ...parsed };
     }
@@ -85,7 +89,7 @@ export default function App() {
   };
 
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <BrowserRouter basename={(import.meta as any).env.BASE_URL}>
       <Routes>
         <Route element={<Layout />}>
           <Route index element={

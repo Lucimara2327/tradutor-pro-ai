@@ -11,6 +11,7 @@ export interface Translation {
 
 export interface AppSettings {
   openaiApiKey: string;
+  geminiApiKey: string;
   theme: 'light' | 'dark';
   autoPlayAudio: boolean;
   model: string;

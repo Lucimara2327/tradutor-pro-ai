@@ -53,6 +53,9 @@ export async function translateText(
     if (error.status === 401) {
       throw new Error('INVALID_KEY');
     }
+    if (error.status === 404) {
+      throw new Error('MODEL_NOT_FOUND');
+    }
     if (error.status === 429) {
       throw new Error('RATE_LIMIT_OR_CREDITS');
     }
