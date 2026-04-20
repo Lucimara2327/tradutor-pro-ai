@@ -1,0 +1,558 @@
+
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  ArrowLeftRight, 
+  Copy, 
+  Volume2, 
+  Trash2, 
+  Sparkles, 
+  Camera, 
+  Image as ImageIcon,
+  Check,
+  AlertCircle,
+  Loader2,
+  Mic,
+  MicOff,
+  ClipboardList
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { LANGUAGES } from '@/src/constants';
+import { AppSettings, Translation } from '@/src/types';
+import { translateText } from '@/src/services/openai';
+import { translateWithGemini, speakWithGemini } from '@/src/services/gemini';
+import { cn } from '@/src/lib/utils';
+
+interface TranslatorProps {
+  settings: AppSettings;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+  addTranslation: (t: Translation) => void;
+}
+
+export default function Translator({ settings, setSettings, addTranslation }: TranslatorProps) {
+  const [inputText, setInputText] = useState('');
+  const [translatedText, setTranslatedText] = useState('');
+  
+  // Initial state from localStorage for persistence
+  const [fromLang, setFromLang] = useState(() => localStorage.getItem('translator_fromLang') || 'auto');
+  const [toLang, setToLang] = useState(() => localStorage.getItem('translator_toLang') || 'en');
+  
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+
+  const ttsTimeoutRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Persistence effect
+  useEffect(() => {
+    localStorage.setItem('translator_fromLang', fromLang);
+    localStorage.setItem('translator_toLang', toLang);
+  }, [fromLang, toLang]);
+
+  useEffect(() => {
+    // Stop all audio on unmount
+    return () => {
+      window.speechSynthesis.cancel();
+      stopGeminiAudio();
+    };
+  }, []);
+
+  const stopGeminiAudio = () => {
+    if (currentAudioSourceRef.current) {
+      currentAudioSourceRef.current.stop();
+      currentAudioSourceRef.current = null;
+    }
+    setIsSpeaking(false);
+  };
+
+  const handleMic = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setError("Seu navegador não suporta reconhecimento de voz.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = fromLang === 'auto' ? 'pt-BR' : fromLang;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setError(null);
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      const fullText = finalTranscript || interimTranscript;
+      if (fullText) {
+        setInputText(prev => prev + ' ' + fullText.trim());
+        // Deduplicate or just append? Appending usually better for continuous
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      setIsListening(false);
+      
+      const errorMsg = event.error === 'not-allowed' 
+        ? "Microfone bloqueado. Por favor, permita o acesso nas configurações do navegador."
+        : event.error === 'no-speech'
+        ? "Nenhuma fala detectada. Tente novamente."
+        : "Erro no microfone: " + event.error;
+        
+      setError(errorMsg);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setInputText(prev => (prev ? prev + '\n' + text : text));
+      }
+    } catch (err) {
+      setError("Não foi possível acessar a área de transferência.");
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (!inputText.trim()) return;
+    
+    // Stop any playing audio
+    window.speechSynthesis.cancel();
+    stopGeminiAudio();
+
+    // Validate engine configuration
+    if (settings.engine === 'openai' && !settings.openaiApiKey) {
+      setError('A chave API OpenAI não foi configurada. Vá em Ajustes ou mude para o motor Gemini.');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+
+    try {
+      let result = '';
+      
+      if (settings.engine === 'gemini') {
+        result = await translateWithGemini(
+          inputText,
+          fromLang,
+          toLang,
+          settings.model.includes('gpt') ? 'gemini-3-flash-preview' : settings.model
+        );
+      } else {
+        result = await translateText(
+          inputText,
+          fromLang,
+          toLang,
+          settings.openaiApiKey,
+          settings.model.includes('gemini') ? 'gpt-4o-mini' : settings.model
+        );
+      }
+
+      setTranslatedText(result);
+      
+      const newTranslation: Translation = {
+        id: crypto.randomUUID(),
+        originalText: inputText,
+        translatedText: result,
+        fromLang,
+        toLang,
+        timestamp: Date.now(),
+        isFavorite: false,
+      };
+      
+      addTranslation(newTranslation);
+
+      if (settings.autoPlayAudio) {
+        speak(result, toLang);
+      }
+    } catch (err: any) {
+      const msg = err.message;
+      if (msg === 'INVALID_KEY') setError('Chave API inválida.');
+      else if (msg === 'RATE_LIMIT_OR_CREDITS') setError('Limite ou créditos OpenAI insuficiente. Recomenda-se usar o motor Gemini nos Ajustes.');
+      else if (msg === 'NO_CONNECTION') setError('Sem conexão com a internet.');
+      else setError('Erro na tradução: ' + (msg || 'falha desconhecida'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSwap = () => {
+    if (fromLang === 'auto') return;
+    const temp = fromLang;
+    setFromLang(toLang);
+    setToLang(temp);
+    setInputText(translatedText);
+    setTranslatedText(inputText);
+  };
+
+  const handleCopy = () => {
+    if (!translatedText) return;
+    navigator.clipboard.writeText(translatedText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const speak = async (text: string, langCode: string) => {
+    window.speechSynthesis.cancel();
+    stopGeminiAudio();
+    if (!text) return;
+
+    setIsSpeaking(true);
+
+    try {
+      // Try high-quality Gemini TTS
+      const base64Data = await speakWithGemini(text);
+      
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+
+      const binaryString = atob(base64Data);
+      const len = binaryString.length;
+      const bytes = new Int16Array(len / 2);
+      for (let i = 0; i < len; i += 2) {
+        bytes[i / 2] = binaryString.charCodeAt(i) | (binaryString.charCodeAt(i + 1) << 8);
+      }
+
+      const audioBuffer = audioContextRef.current.createBuffer(1, bytes.length, 24000);
+      const channelData = audioBuffer.getChannelData(0);
+      for (let i = 0; i < bytes.length; i++) {
+        channelData[i] = bytes[i] / 32768.0;
+      }
+
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+      source.onended = () => {
+        setIsSpeaking(false);
+        currentAudioSourceRef.current = null;
+      };
+      
+      currentAudioSourceRef.current = source;
+      source.start();
+
+    } catch (error) {
+      console.warn('Gemini TTS failed, falling back to system TTS', error);
+      // System Fallback
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = langCode === 'auto' ? 'pt-BR' : langCode;
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const handleClear = () => {
+    setInputText('');
+    setTranslatedText('');
+    setError(null);
+    setIsSpeaking(false);
+    setIsListening(false);
+    window.speechSynthesis.cancel();
+    stopGeminiAudio();
+    recognitionRef.current?.stop();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Mock OCR warning
+      alert("Função OCR (reconhecimento de texto em imagem) em desenvolvimento. A imagem selecionada é: " + file.name);
+    }
+  };
+
+  return (
+    <div className="mt-4 lg:mt-6 space-y-8 animate-in fade-in duration-700 pb-20 overflow-x-hidden px-1">
+      {/* Hidden Inputs */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleFileChange} 
+        accept="image/*" 
+        className="hidden" 
+      />
+      <input 
+        type="file" 
+        ref={cameraInputRef} 
+        onChange={handleFileChange} 
+        accept="image/*" 
+        capture="environment" 
+        className="hidden" 
+      />
+
+      {/* 1. TOPO: Seleção de Idioma */}
+      <div className="relative space-y-4">
+        <div className="grid grid-cols-2 gap-4 items-center">
+          <div className="flex flex-col gap-1.5 p-4 rounded-3xl glass-card bg-white dark:bg-zinc-900/50 border-slate-200 dark:border-white/5 shadow-sm transition-all">
+            <span className="text-[10px] font-black uppercase tracking-[2px] text-[#7B3FE4] opacity-80">Origem</span>
+            <select 
+              value={fromLang}
+              onChange={(e) => setFromLang(e.target.value)}
+              className="bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer w-full text-[var(--text-main)]"
+            >
+              {LANGUAGES.map(lang => (
+                <option key={lang.code} value={lang.code} className="bg-white dark:bg-[#0f172a]">{lang.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5 p-4 rounded-3xl glass-card bg-white dark:bg-zinc-900/50 border-slate-200 dark:border-white/5 shadow-sm transition-all text-right">
+            <span className="text-[10px] font-black uppercase tracking-[2px] text-[#3F8EFC] opacity-80">Destino</span>
+            <select 
+              value={toLang}
+              onChange={(e) => setToLang(e.target.value)}
+              className="bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer w-full text-right text-[var(--text-main)]"
+            >
+              {LANGUAGES.filter(l => l.code !== 'auto').map(lang => (
+                <option key={lang.code} value={lang.code} className="bg-white dark:bg-[#0f172a]">{lang.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+          <button 
+            onClick={handleSwap}
+            disabled={fromLang === 'auto'}
+            className={cn(
+              "p-3 rounded-full glass-card hover:bg-[#7B3FE4] hover:text-white active:scale-90 transition-all shadow-xl bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/10",
+              fromLang === 'auto' && "opacity-30 cursor-not-allowed"
+            )}
+          >
+            <ArrowLeftRight size={20} />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. MEIO: Caixa de texto */}
+      <div className="space-y-4">
+        <div className="relative group shadow-sm">
+          <textarea
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder={isListening ? "Ouvindo... fale agora" : "Digite o texto para traduzir..."}
+            className={cn(
+              "w-full h-[220px] p-7 rounded-[32px] bg-white dark:bg-zinc-900/40 border border-slate-200 dark:border-white/10 focus:border-[#7B3FE4] focus:ring-4 focus:ring-[#7B3FE4]/5 transition-all duration-300 resize-none text-xl placeholder:text-slate-400 outline-none leading-relaxed text-[var(--text-main)]",
+              isListening && "border-[#7B3FE4] ring-4 ring-[#7B3FE4]/10 shadow-[0_0_30px_rgba(123,63,228,0.1)] lg:shadow-[0_0_50px_rgba(123,63,228,0.1)]"
+            )}
+          />
+          
+          <div className="absolute top-5 right-7 flex flex-col items-end gap-1 opacity-40">
+            <span className="text-[9px] font-black uppercase tracking-widest">{inputText.length}</span>
+            <div className="w-8 h-0.5 bg-slate-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+               <div className="h-full bg-[#7B3FE4] transition-all" style={{ width: `${Math.min(100, (inputText.length/500)*100)}%` }} />
+            </div>
+          </div>
+
+          {/* Listening Indicator */}
+          {isListening && (
+            <div className="absolute top-5 left-7 flex items-center gap-2">
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-red-500 animate-pulse">Gravando Áudio</span>
+            </div>
+          )}
+
+          <div className="absolute bottom-6 right-6 flex items-center gap-2">
+            <button 
+              onClick={handlePaste}
+              className="p-3 bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4] rounded-2xl hover:scale-105 active:scale-95 transition-all border border-slate-200 dark:border-white/10 shadow-sm"
+              title="Colar texto"
+            >
+              <ClipboardList size={20} />
+            </button>
+
+            <button 
+              onClick={handleMic}
+              className={cn(
+                "p-4 rounded-2xl transition-all shadow-lg flex items-center justify-center border",
+                isListening 
+                  ? "bg-red-500 text-white border-red-400 animate-pulse scale-110" 
+                  : "bg-[#7B3FE4] text-white border-[#7B3FE4]/20 hover:scale-105"
+              )}
+              title={isListening ? "Parar gravação" : "Traduzir por voz"}
+            >
+              {isListening ? <MicOff size={22} className="animate-bounce" /> : <Mic size={22} />}
+            </button>
+
+            {inputText && (
+              <button 
+                onClick={handleClear}
+                className="p-3 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
+              >
+                <Trash2 size={20} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 3. ABAIXO DA CAIXA: Câmera e Galeria */}
+        <div className="flex items-center justify-center gap-4">
+          <button 
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex-1 h-16 rounded-3xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-white/5 text-slate-500 hover:text-[#7B3FE4] hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center justify-center gap-3 transition-all active:scale-[0.98] font-bold text-sm shadow-sm"
+          >
+            <Camera size={20} />
+            <span>Câmera</span>
+          </button>
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-1 h-16 rounded-3xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-white/5 text-slate-500 hover:text-[#7B3FE4] hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center justify-center gap-3 transition-all active:scale-[0.98] font-bold text-sm shadow-sm"
+          >
+            <ImageIcon size={20} />
+            <span>Galeria</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 4. PARTE INFERIOR: Botão Traduzir */}
+      <div className="space-y-6 pt-4">
+        <button
+          onClick={handleTranslate}
+          disabled={isLoading || !inputText.trim()}
+          className={cn(
+            "primary-btn w-full h-16 flex items-center justify-center gap-3 text-lg shadow-2xl relative overflow-hidden active:scale-[0.97] transition-all",
+            (isLoading || !inputText.trim()) && "brightness-90 saturate-50 opacity-60"
+          )}
+        >
+          {isLoading ? (
+            <div className="flex items-center gap-3">
+              <Loader2 className="animate-spin" size={24} />
+              <span className="font-bold uppercase tracking-widest text-sm">Processando...</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Sparkles size={22} className="text-yellow-200" />
+              <span className="font-black uppercase tracking-[2px] text-sm">Traduzir com IA</span>
+            </div>
+          )}
+          
+          {/* Subtle reflection effect */}
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+        </button>
+
+        {/* Mensagem de Erro com Reparo */}
+        <AnimatePresence>
+          {error && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="p-6 rounded-3xl glass-card bg-red-500/10 border-red-500/20 text-red-500 text-sm font-bold flex flex-col gap-4 shadow-lg shadow-red-500/5 transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <AlertCircle size={20} className="shrink-0" />
+                <span>{error}</span>
+              </div>
+              
+              {error.includes('OpenAI') && (
+                <button 
+                  onClick={() => {
+                    setSettings(prev => ({ 
+                      ...prev, 
+                      engine: 'gemini', 
+                      model: 'gemini-3-flash-preview' 
+                    }));
+                    setError(null);
+                  }}
+                  className="w-full py-4 bg-red-500 text-white rounded-2xl active:scale-[0.98] transition-all text-xs uppercase tracking-widest font-black shadow-lg shadow-red-500/20"
+                >
+                  Alternar para Motor Gemini (Gratuito)
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Resultado */}
+        <AnimatePresence>
+          {translatedText && (
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-8 rounded-[40px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 relative group min-h-[220px] flex flex-col justify-between shadow-2xl shadow-purple-500/5 transition-all"
+            >
+              <div className="space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/5">
+                   <div className="flex flex-col gap-0.5">
+                    <span className="text-[10px] font-black uppercase tracking-[3px] text-[#3F8EFC] opacity-70">Resultado IA</span>
+                    <span className="text-xs font-bold">{LANGUAGES.find(l => l.code === toLang)?.name}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => speak(translatedText, toLang)}
+                      className={cn(
+                        "p-3 rounded-2xl transition-all shadow-sm active:scale-90",
+                        isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-50 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4]"
+                      )}
+                      title="Ouvir"
+                    >
+                      <Volume2 size={22} />
+                    </button>
+                    <button 
+                      onClick={handleCopy}
+                      className="p-3 bg-slate-50 dark:bg-zinc-800 rounded-2xl text-slate-500 hover:text-[#7B3FE4] shadow-sm transition-all active:scale-90"
+                      title="Copiar"
+                    >
+                      {copied ? <Check className="text-green-500" size={22} /> : <Copy size={22} />}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-2xl font-bold leading-relaxed text-[var(--text-main)] whitespace-pre-wrap">
+                  {translatedText}
+                </p>
+              </div>
+              
+              <div className="flex items-center justify-between pt-6 mt-4 border-t border-slate-100 dark:border-white/5">
+                 <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[2px]">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <span>Processado via {settings.engine.toUpperCase()}</span>
+                 </div>
+                 <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest hidden sm:block">
+                   ID: {Math.random().toString(36).substring(7).toUpperCase()}
+                 </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}

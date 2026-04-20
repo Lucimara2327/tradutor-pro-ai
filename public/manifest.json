@@ -1,0 +1,23 @@
+{
+  "name": "Tradutor Pro AI",
+  "short_name": "Tradutor Pro",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#7B3FE4",
+  "description": "Tradutor profissional com Inteligência Artificial e voz natural.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/192/402/402243.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/402/402243.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

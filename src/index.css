@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand-purple: #7B3FE4;
+  --color-brand-blue: #3F8EFC;
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@layer base {
+  :root {
+    --bg-main: #f8fafc;
+    --text-main: #0f172a;
+    --card-bg: rgba(255, 255, 255, 0.8);
+    --card-border: rgba(0, 0, 0, 0.05);
+    --input-bg: #ffffff;
+    --sidebar-bg: #ffffff;
+  }
+
+  .dark {
+    --bg-main: #020617;
+    --text-main: #f8fafc;
+    --card-bg: rgba(30, 41, 59, 0.4);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --input-bg: #0f172a;
+    --sidebar-bg: #030712;
+  }
+
+  body {
+    @apply bg-[var(--bg-main)] text-[var(--text-main)] font-inter transition-colors duration-300;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply backdrop-blur-xl border transition-all;
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+  
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-[#7B3FE4] to-[#3F8EFC];
+  }
+
+  .primary-btn {
+    @apply bg-gradient-to-r from-[#7B3FE4] to-[#3F8EFC] text-white font-bold rounded-2xl shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .secondary-btn {
+    @apply bg-[var(--card-bg)] border border-[var(--card-border)] text-[var(--text-main)] rounded-2xl active:scale-95 transition-all;
+  }
+}

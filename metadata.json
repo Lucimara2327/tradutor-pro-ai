@@ -1,0 +1,6 @@
+{
+  "name": "Tradutor Pro AI",
+  "description": "Aplicativo de tradução profissional impulsionado por IA, com interface moderna, suporte a áudio e histórico.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": []
+}
