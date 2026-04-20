@@ -39,8 +39,10 @@ Estas são as opções mais rápidas e profissionais.
 5. Configure o Replit para servir a pasta `dist` (ou use um servidor Express simples se preferir).
 
 ### 3. GitHub Pages
-1. No seu repositório, vá em **Settings > Pages**.
-2. Selecione a branch `main` (ou a que contém o build) e a pasta `/docs` (ou use uma Action de deploy para Vite).
+1. O app já está pré-configurado para o caminho `/tradutor-pro-ai/`.
+2. No seu repositório, vá em **Settings > Pages**.
+3. Selecione a branch `main` e a pasta `/docs` (ou use uma Action de deploy para Vite).
+4. **Importante:** Se você renomear o repositório no GitHub para algo diferente de `tradutor-pro-ai`, você deve atualizar a propriedade `base` no arquivo `vite.config.ts` para corresponder ao novo nome.
 
 ---
 
