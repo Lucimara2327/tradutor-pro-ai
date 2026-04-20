@@ -64,24 +64,47 @@ export async function translateWithGemini(
 ): Promise<string> {
   const ai = getGeminiClient(apiKey);
 
-  try {
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: `Traduza o seguinte texto de forma natural e precisa para o idioma solicitado. Retorne APENAS o texto traduzido, sem explicações.
-Origem: ${fromLang}
-Destino: ${toLang}
-Texto: ${text}`,
-      config: {
-        temperature: 0.3,
+  async function attempt(retryCount = 0): Promise<string> {
+    try {
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: `Você é um tradutor profissional multilíngue. Traduza o texto abaixo fielmente para o idioma de destino.
+Mantenha o tom, o sentido e a formatação originais. Não omita partes do texto.
+Retorne APENAS o texto traduzido.
+
+Contexto:
+${fromLang === 'auto' ? 'Idioma detectado automaticamente' : `Idioma de origem: ${fromLang}`}
+Idioma de destino: ${toLang}
+
+Texto original:
+${text}`,
+        config: {
+          temperature: 0.2,
+        }
+      });
+
+      const translated = response.text?.trim();
+      if (!translated) {
+        throw new Error('EMPTY_RESPONSE');
       }
-    });
 
-    const translated = response.text?.trim();
-    if (!translated) {
-      throw new Error('EMPTY_RESPONSE');
+      // Length validation
+      const originalWords = text.trim().split(/\s+/).length;
+      const translatedWords = translated.split(/\s+/).length;
+
+      if (originalWords > 5 && translatedWords < 2 && retryCount < 2) {
+        return await attempt(retryCount + 1);
+      }
+
+      return translated;
+    } catch (error) {
+      if (retryCount < 1) return await attempt(retryCount + 1);
+      throw error;
     }
+  }
 
-    return translated;
+  try {
+    return await attempt();
   } catch (error: any) {
     console.error('Gemini translation error:', error);
     throw error;

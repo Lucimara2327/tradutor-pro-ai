@@ -19,67 +19,100 @@ async function startServer() {
   app.post('/api/translate', async (req, res) => {
     const { text, fromLang, toLang, engine, model } = req.body;
 
+    async function attemptTranslation(retryCount = 0): Promise<string> {
+      try {
+        if (!text || !fromLang || !toLang) {
+          throw new Error('Missing required fields');
+        }
+
+        let translated = '';
+
+        if (engine === 'gemini') {
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+            throw new Error('GEMINI_API_KEY_NOT_CONFIGURED');
+          }
+
+          const ai = new GoogleGenAI({ apiKey });
+          const geminiModel = model?.startsWith('gpt') ? 'gemini-3-flash-preview' : (model || 'gemini-3-flash-preview');
+
+          const originContext = fromLang === 'auto' ? 'Idioma detectado automaticamente' : `Idioma: ${fromLang}`;
+          const destContext = `Idioma de destino: ${toLang}`;
+
+          const prompt = `Você é um tradutor profissional multilíngue. Traduza o texto abaixo fielmente.
+Mantenha o tom, o sentido e a formatação originais. Não omita partes do texto.
+Retorne APENAS o texto traduzido.
+
+Contexto:
+${originContext}
+${destContext}
+
+Texto original:
+${text}`;
+
+          const response = await ai.models.generateContent({
+            model: geminiModel,
+            contents: [{ parts: [{ text: prompt }] }],
+          });
+
+          translated = response.text?.trim();
+        } else if (engine === 'openai') {
+          const apiKey = process.env.OPENAI_API_KEY;
+          if (!apiKey) {
+            throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
+          }
+
+          const openai = new OpenAI({ apiKey });
+          const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
+
+          const response = await openai.chat.completions.create({
+            model: openaiModel,
+            messages: [
+              {
+                role: 'system',
+                content: `Você é um tradutor profissional altamente experiente. Sua tarefa é traduzir o texto do usuário para o idioma de destino (${toLang}) de forma natural e precisa. 
+Se o idioma de origem for 'auto', detecte-o automaticamente. 
+Mantenha a integridade total do texto original. 
+Responda APENAS com a tradução, sem explicações.`
+              },
+              {
+                role: 'user',
+                content: text,
+              },
+            ],
+            temperature: 0.2,
+          });
+
+          translated = response.choices[0]?.message?.content?.trim() || '';
+        } else {
+          throw new Error('Invalid engine');
+        }
+
+        // Basic validation: If original is long but translation is just 1-2 words, something is wrong
+        const originalWords = text.trim().split(/\s+/).length;
+        const translatedWords = translated.split(/\s+/).length;
+
+        if (originalWords > 5 && translatedWords < 2 && retryCount < 2) {
+          console.warn(`Translation seems suspiciously short (${translatedWords} vs ${originalWords} words). Retrying...`);
+          return await attemptTranslation(retryCount + 1);
+        }
+
+        return translated;
+      } catch (err) {
+        if (retryCount < 1) return await attemptTranslation(retryCount + 1);
+        throw err;
+      }
+    }
+
     try {
-      if (!text || !fromLang || !toLang) {
-        return res.status(400).json({ error: 'Missing required fields' });
-      }
-
-      if (engine === 'gemini') {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-          return res.status(500).json({ error: 'GEMINI_API_KEY_NOT_CONFIGURED', source: 'server' });
-        }
-
-        const ai = new GoogleGenAI({ apiKey });
-        const geminiModel = model?.startsWith('gpt') ? 'gemini-3-flash-preview' : (model || 'gemini-3-flash-preview');
-
-        const prompt = `Traduza o seguinte texto de forma natural e precisa para o idioma solicitado. Retorne APENAS o texto traduzido, sem explicações.
-Origem: ${fromLang}
-Destino: ${toLang}
-Texto: ${text}`;
-
-        const response = await ai.models.generateContent({
-          model: geminiModel,
-          contents: [{ parts: [{ text: prompt }] }],
-        });
-
-        const translated = response.text?.trim();
-        return res.json({ translatedText: translated });
-      } 
-      
-      if (engine === 'openai') {
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey) {
-          return res.status(500).json({ error: 'OPENAI_API_KEY_NOT_CONFIGURED', source: 'server' });
-        }
-
-        const openai = new OpenAI({ apiKey });
-        const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
-
-        const response = await openai.chat.completions.create({
-          model: openaiModel,
-          messages: [
-            {
-              role: 'system',
-              content: `Traduza o seguinte texto de forma natural e precisa para o idioma solicitado. Retorne apenas a tradução. De: ${fromLang} Para: ${toLang}`
-            },
-            {
-              role: 'user',
-              content: text,
-            },
-          ],
-          temperature: 0.3,
-        });
-
-        const translated = response.choices[0]?.message?.content?.trim();
-        return res.json({ translatedText: translated });
-      }
-
-      res.status(400).json({ error: 'Invalid engine' });
+      const translatedText = await attemptTranslation();
+      return res.json({ translatedText });
     } catch (error: any) {
       console.error('Server translation error:', error);
-      res.status(500).json({ 
+      const isConfigError = error.message.includes('NOT_CONFIGURED');
+      res.status(isConfigError ? 500 : 500).json({ 
         error: error.message || 'Translation failed',
+        source: isConfigError ? 'server' : 'unknown',
         code: error.status === 401 ? 'INVALID_KEY' : 'SERVER_ERROR'
       });
     }

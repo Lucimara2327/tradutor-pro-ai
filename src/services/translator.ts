@@ -10,6 +10,17 @@ export interface TranslationResult {
 
 const translationCache = new Map<string, TranslationResult>();
 
+export function checkCache(
+  text: string,
+  fromLang: string,
+  toLang: string,
+  settings: AppSettings
+): TranslationResult | null {
+  const { engine, model } = settings;
+  const cacheKey = `${engine}-${model}-${fromLang}-${toLang}-${text}`;
+  return translationCache.get(cacheKey) || null;
+}
+
 export async function unifiedTranslate(
   text: string,
   fromLang: string,
@@ -44,13 +55,21 @@ export async function unifiedTranslate(
     // If we get an error from server, check if it's because keys aren't set in backend
     try {
       const errorData = await response.json();
-      if (errorData.source === 'server') {
-        console.warn('Backend keys missing, falling back to client-side keys');
+      if (errorData.source === 'server' || (errorData.error && errorData.error.includes('KEY'))) {
+        console.warn('Backend keys missing or invalid, falling back to client-side keys');
+      } else if (response.status >= 500) {
+        throw new Error('SERVER_OVERLOAD');
+      } else {
+        throw new Error(errorData.error || 'SERVER_ERROR');
       }
-    } catch {
-      // ignore
+    } catch (e: any) {
+      if (e.message === 'SERVER_OVERLOAD') throw e;
+      // ignore JSON parse errors and continue to client fallback
     }
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message === 'SERVER_OVERLOAD') {
+      throw new Error('O servidor está sobrecarregado no momento. Tente novamente em alguns segundos.');
+    }
     console.warn('Server API not available, falling back to client-side translation', error);
   }
 

@@ -18,7 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
-import { unifiedTranslate, unifiedSpeak } from '@/src/services/translator';
+import { unifiedTranslate, unifiedSpeak, checkCache } from '@/src/services/translator';
 import { cn } from '@/src/lib/utils';
 
 interface TranslatorProps {
@@ -28,8 +28,8 @@ interface TranslatorProps {
 }
 
 export default function Translator({ settings, setSettings, addTranslation }: TranslatorProps) {
-  const [inputText, setInputText] = useState('');
-  const [translatedText, setTranslatedText] = useState('');
+  const [inputText, setInputText] = useState(() => localStorage.getItem('translator_inputText') || '');
+  const [translatedText, setTranslatedText] = useState(() => localStorage.getItem('translator_translatedText') || '');
   
   // Initial state from localStorage for persistence
   const [fromLang, setFromLang] = useState(() => localStorage.getItem('translator_fromLang') || 'auto');
@@ -46,7 +46,15 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [ocrStatus, setOcrStatus] = useState('');
 
   const ttsTimeoutRef = useRef<number | null>(null);
-  const lastInputRef = useRef<string>('');
+  const lastInputRef = useRef<string>(
+    (() => {
+      const text = localStorage.getItem('translator_inputText') || '';
+      if (!text) return '';
+      const f = localStorage.getItem('translator_fromLang') || 'auto';
+      const t = localStorage.getItem('translator_toLang') || 'en';
+      return `${text.trim()}-${f}-${t}-${settings.engine}-${settings.model}`;
+    })()
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -57,7 +65,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   useEffect(() => {
     localStorage.setItem('translator_fromLang', fromLang);
     localStorage.setItem('translator_toLang', toLang);
-  }, [fromLang, toLang]);
+    localStorage.setItem('translator_inputText', inputText);
+    localStorage.setItem('translator_translatedText', translatedText);
+  }, [fromLang, toLang, inputText, translatedText]);
 
   useEffect(() => {
     // Stop all audio on unmount
@@ -77,10 +87,17 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
     const timer = setTimeout(() => {
       if (inputText.trim() && !isLoading && !isProcessingOCR) {
-        // Reset lastInputRef if settings changed so it forces re-run
+        // Check cache for instant update
+        const cached = checkCache(inputText.trim(), fromLang, toLang, settings);
+        if (cached) {
+          setTranslatedText(cached.text);
+          setTranslationSource(cached.source);
+          lastInputRef.current = `${inputText.trim()}-${fromLang}-${toLang}-${settings.engine}-${settings.model}`;
+          return;
+        }
         handleTranslate();
       }
-    }, 1200); // Slightly more aggressive debounce (1.2s)
+    }, 800); // More aggressive debounce (0.8s)
 
     return () => clearTimeout(timer);
   }, [inputText, fromLang, toLang, settings.engine, settings.model]);
@@ -169,9 +186,19 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const handleTranslate = async () => {
     if (!inputText.trim() || isLoading) return;
     
-    // Composite key for optimization (avoids repeat with same context)
+    // Composite key for optimization
     const currentContext = `${inputText.trim()}-${fromLang}-${toLang}-${settings.engine}-${settings.model}`;
     if (currentContext === lastInputRef.current) return;
+    
+    // Check cache synchronously for perceived performance
+    const cached = checkCache(inputText.trim(), fromLang, toLang, settings);
+    if (cached) {
+      setTranslatedText(cached.text);
+      setTranslationSource(cached.source);
+      lastInputRef.current = currentContext;
+      return;
+    }
+
     lastInputRef.current = currentContext;
 
     // Stop any playing audio
@@ -224,10 +251,12 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       }
     } catch (err: any) {
       const msg = err.message;
-      if (msg === 'INVALID_KEY') setError('Chave API inválida.');
-      else if (msg === 'RATE_LIMIT_OR_CREDITS') setError('Limite ou créditos OpenAI insuficiente. Recomenda-se usar o motor Gemini nos Ajustes.');
-      else if (msg === 'NO_CONNECTION') setError('Sem conexão com a internet.');
-      else setError('Erro na tradução: ' + (msg || 'falha desconhecida'));
+      if (msg === 'INVALID_KEY') setError('Chave API inválida. Verifique seus Ajustes.');
+      else if (msg === 'EMPTY_RESPONSE') setError('A IA retornou uma resposta vazia. Tente novamente com um texto mais claro.');
+      else if (msg === 'RATE_LIMIT_OR_CREDITS') setError('Limite atingido ou créditos insuficientes. Tente o motor Gemini nos Ajustes.');
+      else if (msg === 'NO_CONNECTION') setError('Sem conexão com a internet. Verifique seu sinal.');
+      else if (msg.includes('sobrecarregado')) setError(msg);
+      else setError('Ocorreu um problema ao traduzir: ' + (msg || 'falha na comunicação com a IA'));
     } finally {
       setIsLoading(false);
     }
@@ -303,6 +332,8 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const handleClear = () => {
     setInputText('');
     setTranslatedText('');
+    localStorage.removeItem('translator_inputText');
+    localStorage.removeItem('translator_translatedText');
     setError(null);
     setIsSpeaking(false);
     setIsListening(false);
@@ -642,11 +673,15 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         </AnimatePresence>
 
         {/* Resultado */}
-        <AnimatePresence>
-          {translatedText && (
+        <AnimatePresence mode="wait">
+          {isLoading ? (
+            <TranslationSkeleton key="skeleton" />
+          ) : translatedText ? (
             <motion.div
+              key="result"
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
               className="p-8 rounded-[40px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 relative group min-h-[220px] flex flex-col justify-between shadow-2xl shadow-purple-500/5 transition-all"
             >
               <div className="space-y-6">
@@ -693,9 +728,45 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                  </div>
               </div>
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+function TranslationSkeleton() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="p-8 rounded-[40px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 min-h-[220px] flex flex-col justify-between shadow-2xl shadow-purple-500/5"
+    >
+      <div className="space-y-6">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/5">
+          <div className="space-y-2">
+            <div className="h-2 w-20 bg-slate-100 dark:bg-zinc-800 rounded-full animate-pulse" />
+            <div className="h-3 w-28 bg-slate-200 dark:bg-zinc-700 rounded-full animate-pulse" />
+          </div>
+          <div className="flex gap-2">
+            <div className="w-10 h-10 rounded-2xl bg-slate-50 dark:bg-zinc-800 animate-pulse" />
+            <div className="w-10 h-10 rounded-2xl bg-slate-50 dark:bg-zinc-800 animate-pulse" />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div className="h-6 w-full bg-slate-100 dark:bg-zinc-800 rounded-xl animate-pulse" />
+          <div className="h-6 w-[90%] bg-slate-100 dark:bg-zinc-800 rounded-xl animate-pulse" />
+          <div className="h-6 w-[40%] bg-slate-100 dark:bg-zinc-800 rounded-xl animate-pulse" />
+        </div>
+      </div>
+      
+      <div className="flex items-center justify-between pt-6 mt-4 border-t border-slate-100 dark:border-white/5">
+         <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-slate-200 dark:bg-zinc-700 animate-pulse" />
+            <div className="h-2 w-32 bg-slate-100 dark:bg-zinc-800 rounded-full animate-pulse" />
+         </div>
+      </div>
+    </motion.div>
   );
 }
