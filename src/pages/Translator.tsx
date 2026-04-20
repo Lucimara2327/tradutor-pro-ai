@@ -40,6 +40,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [copied, setCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [translationSource, setTranslationSource] = useState<'server' | 'client' | null>(null);
 
   const ttsTimeoutRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -176,12 +177,13 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         settings
       );
 
-      setTranslatedText(result);
+      setTranslatedText(result.text);
+      setTranslationSource(result.source);
       
       const newTranslation: Translation = {
         id: crypto.randomUUID(),
         originalText: inputText,
-        translatedText: result,
+        translatedText: result.text,
         fromLang,
         toLang,
         timestamp: Date.now(),
@@ -191,7 +193,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       addTranslation(newTranslation);
 
       if (settings.autoPlayAudio) {
-        speak(result, toLang);
+        speak(result.text, toLang);
       }
     } catch (err: any) {
       const msg = err.message;
@@ -536,8 +538,11 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
               
               <div className="flex items-center justify-between pt-6 mt-4 border-t border-slate-100 dark:border-white/5">
                  <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[2px]">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    <span>Processado via {settings.engine.toUpperCase()}</span>
+                    <div className={cn(
+                      "w-1.5 h-1.5 rounded-full animate-pulse",
+                      translationSource === 'server' ? "bg-green-500" : "bg-orange-500"
+                    )} />
+                    <span>Processado via {settings.engine.toUpperCase()} • {translationSource === 'server' ? 'SEGURO' : 'LOCAL'}</span>
                  </div>
                  <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest hidden sm:block">
                    ID: {Math.random().toString(36).substring(7).toUpperCase()}
