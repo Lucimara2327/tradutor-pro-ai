@@ -18,7 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
-import { unifiedTranslate, unifiedSpeak, checkCache } from '@/src/services/translator';
+import { unifiedTranslate, unifiedSpeak } from '@/src/services/translator';
 import { cn } from '@/src/utils';
 
 interface TranslatorProps {
@@ -46,15 +46,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [ocrStatus, setOcrStatus] = useState('');
 
   const ttsTimeoutRef = useRef<number | null>(null);
-  const lastInputRef = useRef<string>(
-    (() => {
-      const text = localStorage.getItem('translator_inputText') || '';
-      if (!text) return '';
-      const f = localStorage.getItem('translator_fromLang') || 'auto';
-      const t = localStorage.getItem('translator_toLang') || 'en';
-      return `${text.trim()}-${f}-${t}-${settings.engine}-${settings.model}`;
-    })()
-  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -82,7 +73,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   useEffect(() => {
     if (!inputText.trim()) {
       setTranslatedText('');
-      lastInputRef.current = '';
     }
   }, [inputText]);
 
@@ -170,21 +160,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const handleTranslate = async () => {
     if (!inputText.trim() || isLoading) return;
     
-    // Composite key for optimization
-    const currentContext = `${inputText.trim()}-${fromLang}-${toLang}-${settings.engine}-${settings.model}`;
-    if (currentContext === lastInputRef.current) return;
-    
-    // Check cache synchronously for perceived performance
-    const cached = checkCache(inputText.trim(), fromLang, toLang, settings);
-    if (cached) {
-      setTranslatedText(cached.text);
-      setTranslationSource(cached.source);
-      lastInputRef.current = currentContext;
-      return;
-    }
-
-    lastInputRef.current = currentContext;
-
     setIsLoading(true);
     setError(null);
     window.speechSynthesis.cancel();
@@ -670,7 +645,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           {isLoading ? (
             <div className="flex items-center gap-3">
               <Loader2 className="animate-spin" size={24} />
-              <span className="font-bold uppercase tracking-widest text-sm">Processando...</span>
+              <span className="font-bold uppercase tracking-widest text-sm">Traduzindo...</span>
             </div>
           ) : (
             <div className="flex items-center gap-3">
