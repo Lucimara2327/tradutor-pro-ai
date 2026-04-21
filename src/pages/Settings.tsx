@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Key, Moon, Sun, Volume2, ShieldCheck, ExternalLink, Save, CheckCircle2, XCircle, Cpu, Zap, Download } from 'lucide-react';
 import { AppSettings } from '@/src/types';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import { cn } from '@/src/utils';
 
 interface SettingsPageProps {
   settings: AppSettings;

@@ -19,7 +19,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
 import { unifiedTranslate, unifiedSpeak, checkCache } from '@/src/services/translator';
-import { cn } from '@/src/lib/utils';
+import { cn } from '@/src/utils';
 
 interface TranslatorProps {
   settings: AppSettings;

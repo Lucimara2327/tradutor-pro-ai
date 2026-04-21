@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Languages, History, Settings, Star, Info } from 'lucide-react';
 import { motion } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import { cn } from '@/src/utils';
 import AppInfo from './AppInfo';
 
 export default function Layout() {

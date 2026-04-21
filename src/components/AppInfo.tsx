@@ -12,7 +12,7 @@ import {
   Maximize2,
   Info
 } from 'lucide-react';
-import { cn } from '@/src/lib/utils';
+import { cn } from '@/src/utils';
 
 interface AppInfoProps {
   isOpen: boolean;

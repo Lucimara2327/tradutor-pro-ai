@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Star, Trash2, Volume2, Copy, Check, ArrowLeftRight } from 'lucide-react';
 import { Translation } from '@/src/types';
 import { LANGUAGES } from '@/src/constants';
-import { cn } from '@/src/lib/utils';
+import { cn } from '@/src/utils';
 import { motion } from 'motion/react';
 
 interface TranslationItemProps {
