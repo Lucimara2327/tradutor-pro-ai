@@ -3,7 +3,6 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,103 +16,65 @@ async function startServer() {
 
   // API Route
   app.post('/api/translate', async (req, res) => {
-    const { text, fromLang, toLang, engine, model, fluentMode, geminiApiKey, openaiApiKey } = req.body;
+    const { text, fromLang, toLang, engine, model, fluentMode, translationStyle, openaiApiKey } = req.body;
     const isFluent = !!fluentMode;
+    const style = translationStyle || (isFluent ? 'fluent' : 'normal');
 
-    async function attemptTranslation(retryCount = 0): Promise<string> {
-      try {
-        if (!text || !fromLang || !toLang) {
-          throw new Error('Missing required fields');
-        }
-
-        let translated = '';
-
-        if (engine === 'openai') {
-          const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
-          if (!apiKey) {
-            throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
-          }
-
-          const openai = new OpenAI({ apiKey });
-          const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
-
-          const normalPrompt = `Você é um tradutor PRO. Traduza o texto de forma DIRETA, LITERAL e FIEL. 
-REGRAS:
-- PRIORIDADE: Tradução literal absoluta.
-- AMBIGUIDADE: Use o significado mais comum.
-- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
-Idioma destino: ${toLang}`;
-
-          const fluentPrompt = `Você é um tradutor PRO inteligente. Traduza o texto de forma NATURAL e FLUENTE.
-REGRAS:
-- FLUIDEZ: Melhore levemente a concordância e naturalidade.
-- FIDELIDADE: Mantenha o significado e intenção original intactos.
-- AMBIGUIDADE: Use o significado mais comum.
-- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
-Idioma destino: ${toLang}`;
-
-          const response = await openai.chat.completions.create({
-            model: openaiModel,
-            messages: [
-              {
-                role: 'system',
-                content: isFluent ? fluentPrompt : normalPrompt
-              },
-              {
-                role: 'user',
-                content: text,
-              },
-            ],
-            temperature: isFluent ? 0.2 : 0.05,
-          });
-
-          translated = response.choices[0]?.message?.content?.trim() || '';
-        } else if (engine === 'gemini') {
-          const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
-          if (!apiKey) {
-            throw new Error('GEMINI_API_KEY_NOT_CONFIGURED');
-          }
-
-          const ai = new GoogleGenAI({ apiKey });
-          const geminiModel = "gemini-3-flash-preview";
-
-          const promptText = `Você é um tradutor rápido. Traduza de forma DIRETA e LITERAL.
-Regras:
-- NÃO use modo fluente.
-- NÃO reescreva ou interprete.
-- Priorize velocidade e fidelidade literal.
-- Se houver ambiguidade, escolha o significado mais comum.
-- Retorne APENAS o texto traduzido.
-Idioma destino: ${toLang}
-
-Texto:
-${text}`;
-
-          const response = await ai.models.generateContent({
-            model: geminiModel,
-            contents: promptText,
-            config: {
-              temperature: 0,
-            }
-          });
-
-          translated = response.text?.trim() || '';
-        } else {
-          throw new Error('Invalid engine');
-        }
-
-        return translated;
-      } catch (err) {
-        if (retryCount < 1) return await attemptTranslation(retryCount + 1);
-        throw err;
-      }
+    if (engine !== 'openai') {
+      return res.status(400).json({ error: 'Unsupported backend engine' });
     }
 
     try {
-      const translatedText = await attemptTranslation();
-      if (!translatedText || translatedText.trim() === "" || translatedText === text) {
+      if (!text || !fromLang || !toLang) {
+        throw new Error('Missing required fields');
+      }
+
+      const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
+      }
+
+      const openai = new OpenAI({ apiKey });
+      const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
+
+      let styleInstruction = "";
+      if (style === 'fluent') {
+        styleInstruction = "- Estilo FLUENTE: Deixe a frase mais natural, como um falante nativo diria, sem alterar demais o sentido original.";
+      } else if (style === 'formal') {
+        styleInstruction = "- Estilo FORMAL: Use linguagem educada e mais completa, adequada para situações formais.";
+      } else if (style === 'informal') {
+        styleInstruction = "- Estilo INFORMAL: Use linguagem simples, leve e comum no dia a dia.";
+      } else {
+        styleInstruction = "- Estilo NORMAL: Realize uma tradução fiel e direta, mantendo o significado original.";
+      }
+
+      const response = await openai.chat.completions.create({
+        model: openaiModel,
+        messages: [
+          {
+            role: 'system',
+            content: `Você é um tradutor nível profissional. 
+Regras:
+- NÃO traduza palavra por palavra, mas FOQUE em preservar o significado original.
+${styleInstruction}
+- NÃO exagere na reescrita; evite mudar demais a estrutura se não for estritamente necessário.
+- Corrija eventuais erros gramaticais do texto original durante a tradução.
+- Retorne APENAS a tradução final, sem aspas e sem explicações.`
+          },
+          {
+            role: 'user',
+            content: text,
+          },
+        ],
+        temperature: style === 'informal' ? 0.5 : 0.3,
+      });
+
+      const translatedText = response.choices[0]?.message?.content?.trim() || '';
+      
+      if (!translatedText) {
         throw new Error('SERVER_INVALID_RESPONSE');
       }
+
       return res.json({ translatedText });
     } catch (error: any) {
       console.error('Server translation error:', error);

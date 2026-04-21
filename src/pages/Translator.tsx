@@ -18,7 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
-import { unifiedTranslate, unifiedSpeak } from '@/src/services/translator';
+import { unifiedTranslate, unifiedSpeak, detectLanguage } from '@/src/services/translator';
 import { cn } from '@/src/utils';
 
 interface TranslatorProps {
@@ -36,6 +36,10 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [toLang, setToLang] = useState(() => localStorage.getItem('translator_toLang') || 'en');
   
   const [isLoading, setIsLoading] = useState(false);
+  const [comparisonResults, setComparisonResults] = useState<{ openai: string; gemini: string } | null>(() => {
+    const saved = localStorage.getItem('translator_comparisonResults');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -44,6 +48,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrStatus, setOcrStatus] = useState('');
+  const [detectedSuggestion, setDetectedSuggestion] = useState<string | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [isOutdated, setIsOutdated] = useState(false);
 
   const ttsTimeoutRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,6 +59,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const currentSpeechIdRef = useRef<number>(0);
+  const currentRequestIdRef = useRef(0);
 
   // Persistence effect
   useEffect(() => {
@@ -59,7 +67,46 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     localStorage.setItem('translator_toLang', toLang);
     localStorage.setItem('translator_inputText', inputText);
     localStorage.setItem('translator_translatedText', translatedText);
-  }, [fromLang, toLang, inputText, translatedText]);
+    if (comparisonResults) {
+      localStorage.setItem('translator_comparisonResults', JSON.stringify(comparisonResults));
+    } else {
+      localStorage.removeItem('translator_comparisonResults');
+    }
+  }, [fromLang, toLang, inputText, translatedText, comparisonResults]);
+
+  // Language detection effect
+  useEffect(() => {
+    if (inputText.trim().length < 10) {
+      setDetectedSuggestion(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      // Don't detect if auto is already selected
+      if (fromLang === 'auto') return;
+
+      setIsDetecting(true);
+      try {
+        const detected = await detectLanguage(inputText, settings);
+        
+        // Rule 3: Se detectar que o texto está no mesmo idioma do destino: Ajustar automaticamente o idioma de origem
+        if (detected && detected === toLang && detected !== fromLang) {
+          // Auto-adjusting source language to match detected
+          setFromLang(detected);
+          setError(null);
+          setDetectedSuggestion(null);
+        } else {
+          setDetectedSuggestion(null);
+        }
+      } catch (err) {
+        console.warn('Auto-detect failed silent');
+      } finally {
+        setIsDetecting(false);
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [inputText, fromLang, toLang, settings]);
 
   useEffect(() => {
     // Stop all audio on unmount
@@ -73,8 +120,25 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   useEffect(() => {
     if (!inputText.trim()) {
       setTranslatedText('');
+      setComparisonResults(null);
     }
   }, [inputText]);
+
+  // Language Change Effect - Still automatic
+  useEffect(() => {
+    if (!inputText.trim() || isProcessingOCR) return;
+    const timer = setTimeout(() => {
+      handleTranslate();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [fromLang, toLang]);
+
+  // Style Change Effect - Now just marks as outdated
+  useEffect(() => {
+    if (inputText.trim() && translatedText) {
+      setIsOutdated(true);
+    }
+  }, [settings.translationStyle, settings.fluentMode]);
 
   const stopGeminiAudio = () => {
     if (currentAudioSourceRef.current) {
@@ -158,58 +222,115 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   const handleTranslate = async () => {
-    if (!inputText.trim() || isLoading) return;
+    if (!inputText.trim()) return;
+
+    // Rule 1: Se idioma de origem for igual ao destino: NÃO permitir tradução
+    if (fromLang !== 'auto' && fromLang === toLang) {
+      setError("Selecione idiomas diferentes para traduzir");
+      return;
+    }
     
     setIsLoading(true);
     setError(null);
+    setIsOutdated(false);
+    const requestId = ++currentRequestIdRef.current;
+    
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
 
     try {
-      const result = await unifiedTranslate(
-        inputText,
-        fromLang,
-        toLang,
-        settings
-      );
+      if (settings.comparisonMode) {
+        // AI Comparison Mode: Run both in parallel
+        const [openaiRes, geminiRes] = await Promise.all([
+          unifiedTranslate(inputText, fromLang, toLang, { ...settings, engine: 'openai' }),
+          unifiedTranslate(inputText, fromLang, toLang, { ...settings, engine: 'gemini' })
+        ]);
 
-      setTranslatedText(result.text);
-      setTranslationSource(result.source);
-      
-      const newTranslation: Translation = {
-        id: crypto.randomUUID(),
-        originalText: inputText,
-        translatedText: result.text,
-        fromLang,
-        toLang,
-        timestamp: Date.now(),
-        isFavorite: false,
-      };
-      
-      addTranslation(newTranslation);
+        if (requestId !== currentRequestIdRef.current) return;
 
-      if (settings.autoPlayAudio) {
-        speak(result.text, toLang);
+        setComparisonResults({
+          openai: openaiRes.text,
+          gemini: geminiRes.text
+        });
+
+        // Use primary engine for main translated text (audio/persistence)
+        const primaryResult = settings.engine === 'openai' ? openaiRes : geminiRes;
+        setTranslatedText(primaryResult.text);
+        setTranslationSource(primaryResult.source);
+
+        const newTranslation: Translation = {
+          id: crypto.randomUUID(),
+          originalText: inputText,
+          translatedText: primaryResult.text,
+          fromLang,
+          toLang,
+          timestamp: Date.now(),
+          isFavorite: false,
+        };
+        addTranslation(newTranslation);
+
+        if (settings.autoPlayAudio) {
+          speak(primaryResult.text, toLang);
+        }
+      } else {
+        // Normal Mode
+        const result = await unifiedTranslate(
+          inputText,
+          fromLang,
+          toLang,
+          settings
+        );
+
+        if (requestId !== currentRequestIdRef.current) return;
+
+        setTranslatedText(result.text);
+        setTranslationSource(result.source);
+        
+        const newTranslation: Translation = {
+          id: crypto.randomUUID(),
+          originalText: inputText,
+          translatedText: result.text,
+          fromLang,
+          toLang,
+          timestamp: Date.now(),
+          isFavorite: false,
+        };
+        
+        addTranslation(newTranslation);
+
+        if (settings.autoPlayAudio) {
+          speak(result.text, toLang);
+        }
       }
     } catch (err: any) {
-      // Logic leaks: unifiedTranslate already returns a fallback, 
-      // but if something catastrophic happens during result processing:
+      if (requestId !== currentRequestIdRef.current) return;
       console.error('Catastrophic translation error handled:', err);
-      // Ensure we don't leave the user hanging
-      setTranslatedText(inputText);
-      setTranslationSource('client');
     } finally {
-      setIsLoading(false);
+      if (requestId === currentRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleSwap = () => {
     if (fromLang === 'auto') return;
+
+    // Rule 2: Verificar antes se são iguais
+    if (fromLang === toLang) {
+      // Sugerir automaticamente um idioma diferente (ex: Português)
+      // Se já for português, sugerimos inglês
+      const suggestion = fromLang === 'pt' ? 'en' : 'pt';
+      setFromLang(suggestion);
+      setError(null);
+      return;
+    }
+
     const temp = fromLang;
     setFromLang(toLang);
     setToLang(temp);
     setInputText(translatedText);
     setTranslatedText(inputText);
+    setError(null);
   };
 
   const handleCopy = () => {
@@ -324,8 +445,10 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const handleClear = () => {
     setInputText('');
     setTranslatedText('');
+    setComparisonResults(null);
     localStorage.removeItem('translator_inputText');
     localStorage.removeItem('translator_translatedText');
+    localStorage.removeItem('translator_comparisonResults');
     setError(null);
     setIsSpeaking(false);
     setIsListening(false);
@@ -451,7 +574,15 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
             <span className="text-[10px] font-black uppercase tracking-[2px] text-[#7B3FE4] opacity-80">Origem</span>
             <select 
               value={fromLang}
-              onChange={(e) => setFromLang(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFromLang(val);
+                if (val !== 'auto' && val === toLang) {
+                  setError("Selecione idiomas diferentes para traduzir");
+                } else {
+                  setError(null);
+                }
+              }}
               className="bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer w-full text-[var(--text-main)]"
             >
               {LANGUAGES.map(lang => (
@@ -464,7 +595,15 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
             <span className="text-[10px] font-black uppercase tracking-[2px] text-[#3F8EFC] opacity-80">Destino</span>
             <select 
               value={toLang}
-              onChange={(e) => setToLang(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setToLang(val);
+                if (fromLang !== 'auto' && fromLang === val) {
+                  setError("Selecione idiomas diferentes para traduzir");
+                } else {
+                  setError(null);
+                }
+              }}
               className="bg-transparent text-sm font-bold focus:outline-none appearance-none cursor-pointer w-full text-right text-[var(--text-main)]"
             >
               {LANGUAGES.filter(l => l.code !== 'auto').map(lang => (
@@ -488,13 +627,86 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         </div>
       </div>
     
-      {/* Opção Modo Fluente - MOSTRAR APENAS SE FOR OPENAI */}
-      {settings.engine === 'openai' && (
-        <div className="flex items-center justify-end px-2">
+      {/* Erro amigável se idiomas forem iguais */}
+      <AnimatePresence>
+        {error && (fromLang === toLang && fromLang !== 'auto') && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center gap-2 p-3 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold uppercase tracking-widest justify-center"
+          >
+            <AlertCircle size={14} />
+            <span>{error}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Seleção de Estilo */}
+      <div className="flex flex-wrap items-center justify-center gap-2 px-2">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-500 mr-2">Estilo:</span>
+        {(['normal', 'fluent', 'formal', 'informal'] as const).map((style) => (
+          <button
+            key={style}
+            onClick={() => setSettings(prev => ({ ...prev, translationStyle: style }))}
+            className={cn(
+              "px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border",
+              settings.translationStyle === style
+                ? "bg-[#7B3FE4] border-[#7B3FE4] text-white shadow-lg shadow-[#7B3FE4]/20 scale-105"
+                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/10 text-slate-500 hover:border-[#7B3FE4]/50"
+            )}
+          >
+            {style === 'normal' && 'Normal'}
+            {style === 'fluent' && 'Fluente'}
+            {style === 'formal' && 'Formal'}
+            {style === 'informal' && 'Informal'}
+          </button>
+        ))}
+      </div>
+
+      <AnimatePresence>
+        {isOutdated && translatedText && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="flex justify-center"
+          >
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold uppercase tracking-widest shadow-sm">
+              <AlertCircle size={12} />
+              <span>Estilo alterado — clique em 'Traduzir com IA' para atualizar</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-3 px-2">
+        <button
+          onClick={() => setSettings(prev => ({ ...prev, comparisonMode: !prev.comparisonMode }))}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest",
+            settings.comparisonMode 
+              ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 shadow-sm shadow-blue-500/5" 
+              : "bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500"
+          )}
+        >
+          <ClipboardList size={14} className={cn(settings.comparisonMode && "animate-pulse")} />
+          <span>Modo Comparação de IA {settings.comparisonMode ? 'Ativado' : 'Desativado'}</span>
+          <div className={cn(
+            "w-8 h-4 rounded-full relative transition-all ml-1",
+            settings.comparisonMode ? "bg-blue-500" : "bg-slate-300 dark:bg-zinc-700"
+          )}>
+            <div className={cn(
+              "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all",
+              settings.comparisonMode ? "left-4.5" : "left-0.5"
+            )} />
+          </div>
+        </button>
+
+        {settings.engine === 'openai' && !settings.comparisonMode && (
           <button
             onClick={() => setSettings(prev => ({ ...prev, fluentMode: !prev.fluentMode }))}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-bold text-xs uppercase tracking-widest",
+              "flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest",
               settings.fluentMode 
                 ? "bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400 shadow-sm shadow-purple-500/5" 
                 : "bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500"
@@ -512,11 +724,39 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
               )} />
             </div>
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 2. MEIO: Caixa de texto */}
       <div className="space-y-4">
+        {/* Sugestão de detecção */}
+        <AnimatePresence>
+          {detectedSuggestion && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="mx-2 mb-2 p-2 px-4 rounded-2xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 flex items-center justify-between text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-widest">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={14} />
+                  <span>Idioma detectado: {LANGUAGES.find(l => l.code === detectedSuggestion)?.name}</span>
+                </div>
+                <button 
+                  onClick={()=>{
+                    handleSwap();
+                    setDetectedSuggestion(null);
+                  }}
+                  className="bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 transition-colors"
+                >
+                  Inverter Idiomas
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="relative group shadow-sm">
           <textarea
             value={inputText}
@@ -663,7 +903,36 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         {/* Resultado */}
         <AnimatePresence mode="wait">
           {isLoading ? (
-            <TranslationSkeleton key="skeleton" />
+            <TranslationSkeleton key="skeleton" comparisonMode={settings.comparisonMode} />
+          ) : settings.comparisonMode && comparisonResults ? (
+            <div key="comparison" className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in slide-in-from-bottom-5 duration-500">
+              <ComparisonCard 
+                engine="openai" 
+                text={comparisonResults.openai} 
+                onSpeak={() => speak(comparisonResults.openai, toLang)}
+                isSpeaking={isSpeaking}
+                onCopy={() => {
+                  navigator.clipboard.writeText(comparisonResults.openai);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                isCopied={copied}
+                toLang={toLang}
+              />
+              <ComparisonCard 
+                engine="gemini" 
+                text={comparisonResults.gemini} 
+                onSpeak={() => speak(comparisonResults.gemini, toLang)}
+                isSpeaking={isSpeaking}
+                onCopy={() => {
+                  navigator.clipboard.writeText(comparisonResults.gemini);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                isCopied={copied}
+                toLang={toLang}
+              />
+            </div>
           ) : translatedText ? (
             <motion.div
               key="result"
@@ -723,7 +992,68 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   );
 }
 
-function TranslationSkeleton() {
+function ComparisonCard({ engine, text, onSpeak, isSpeaking, onCopy, isCopied, toLang }: any) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="p-6 rounded-[32px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 flex flex-col justify-between shadow-xl"
+    >
+      <div className="space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+          <div className="flex flex-col gap-0.5">
+            <span className={cn(
+              "text-[9px] font-black uppercase tracking-[2px]",
+              engine === 'openai' ? "text-[#7B3FE4]" : "text-[#3F8EFC]"
+            )}>
+              Resultado {engine === 'openai' ? 'OpenAI' : 'Gemini'}
+            </span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase">
+              {LANGUAGES.find(l => l.code === toLang)?.name}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={onSpeak}
+              className={cn(
+                "p-2.5 rounded-xl transition-all active:scale-90",
+                isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-50 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4]"
+              )}
+            >
+              <Volume2 size={18} />
+            </button>
+            <button 
+              onClick={onCopy}
+              className="p-2.5 bg-slate-50 dark:bg-zinc-800 rounded-xl text-slate-500 hover:text-[#7B3FE4] transition-all active:scale-90"
+            >
+              {isCopied ? <Check className="text-green-500" size={18} /> : <Copy size={18} />}
+            </button>
+          </div>
+        </div>
+        <p className="text-lg font-bold leading-relaxed text-[var(--text-main)] whitespace-pre-wrap">
+          {text}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+const TranslationSkeleton: React.FC<{ comparisonMode?: boolean }> = ({ comparisonMode }) => {
+  if (comparisonMode) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-pulse">
+        {[1, 2].map(i => (
+          <div key={i} className="p-6 rounded-[32px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 h-[220px] flex flex-col justify-between">
+            <div className="space-y-4">
+              <div className="h-2 w-20 bg-slate-100 dark:bg-zinc-800 rounded-full" />
+              <div className="h-6 w-full bg-slate-100 dark:bg-zinc-800 rounded-xl" />
+              <div className="h-6 w-[80%] bg-slate-100 dark:bg-zinc-800 rounded-xl" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}

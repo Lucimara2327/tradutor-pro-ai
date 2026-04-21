@@ -87,22 +87,36 @@ export async function translateWithGemini(
   toLang: string,
   apiKey?: string,
   _ignoredModel: string = 'gemini-1.5-flash',
-  fluentMode: boolean = false
+  fluentMode: boolean = false,
+  translationStyle: 'normal' | 'fluent' | 'formal' | 'informal' = 'normal'
 ): Promise<string> {
+  const style = translationStyle || (fluentMode ? 'fluent' : 'normal');
+
   async function attempt(retryCount = 0): Promise<string> {
     try {
       const ai = getGeminiClient(apiKey);
       const model = "gemini-3-flash-preview";
 
-      const prompt = `Você é um tradutor rápido. Traduza de ${fromLang === 'auto' ? 'detectado' : fromLang} para ${toLang}.
-Regras:
-- TRADUÇÃO DIRETA, LITERAL e CORRETA.
-- NÃO use modo fluente ou reescrita.
-- Priorize velocidade e fidelidade literal.
-- Se houver ambiguidade, escolha o significado mais comum.
-- Retorne APENAS o texto traduzido.
+      let styleInstruction = "";
+      if (style === 'fluent') {
+        styleInstruction = "2. Estilo FLUENTE: Deixe a frase mais natural, como um falante nativo diria, sem alterar demais o sentido original.";
+      } else if (style === 'formal') {
+        styleInstruction = "2. Estilo FORMAL: Use linguagem educada e mais completa.";
+      } else if (style === 'informal') {
+        styleInstruction = "2. Estilo INFORMAL: Use linguagem simples, leve e comum no dia a dia.";
+      } else {
+        styleInstruction = "2. Estilo NORMAL: Tradução fiel e direta.";
+      }
 
-Texto original:
+      const prompt = `Traduza de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang} em nível PROFISSIONAL.
+Regras:
+1. Preserve o SIGNIFICADO original da frase acima de tudo.
+${styleInstruction}
+3. Corrija gramática do original, mas NÃO exagere na reescrita.
+4. Evite mudar demais a estrutura quando não for necessário.
+5. Retorne APENAS o texto traduzido final, SEM aspas e SEM explicações.
+
+Texto:
 ${text}`;
 
       const response = await ai.models.generateContent({

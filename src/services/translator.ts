@@ -106,6 +106,82 @@ async function translateLocal(text: string, fromLang: string, toLang: string): P
   return text.length > 50 ? `${text.substring(0, 47)}...` : text; 
 }
 
+// 7. VALIDAÇÃO DE RESPOSTA (isValidTranslation)
+const isValidTranslation = (original: string, translated: string | null | undefined): boolean => {
+  if (!translated || translated.trim() === "") return false;
+  const cleanOrig = original.trim().toLowerCase();
+  const cleanTrans = translated.trim().toLowerCase();
+
+  // 1. Proibir frases iguais ao original (apenas para textos minimamente longos)
+  if (original.length > 5 && cleanOrig === cleanTrans) return false;
+
+  // 2. Proibir explicações comuns da IA
+  const hallucinations = ['here is the translation', 'tradução:', 'the translation is', 'translated to', 'claro, aqui está', 'tradução fiel:'];
+  if (hallucinations.some(h => cleanTrans.includes(h))) return false;
+
+  // 3. Validação de Comprimento Heurística (Apenas para frases longas)
+  if (original.length > 30) {
+     const ratio = translated.length / original.length;
+     if (ratio < 0.15 || ratio > 6) return false; // Slightly more relaxed for chunks
+  }
+
+  return true;
+};
+
+/**
+ * Splits text into chunks respecting natural boundaries.
+ */
+function splitIntoChunks(text: string, limit: number = 4000): string[] {
+  if (text.length <= limit) return [text];
+
+  const chunks: string[] = [];
+  let remainingText = text;
+
+  while (remainingText.length > 0) {
+    if (remainingText.length <= limit) {
+      chunks.push(remainingText);
+      break;
+    }
+
+    let splitIndex = -1;
+    const sub = remainingText.substring(0, limit);
+
+    // Prefer paragraph breaks
+    splitIndex = sub.lastIndexOf('\n\n');
+    
+    // Then line breaks
+    if (splitIndex === -1 || splitIndex < limit * 0.3) {
+      const lineBreak = sub.lastIndexOf('\n');
+      if (lineBreak > limit * 0.3) splitIndex = lineBreak;
+    }
+
+    // Then sentence endings (dot, question, exclamation + space)
+    if (splitIndex === -1 || splitIndex < limit * 0.3) {
+      const sentenceEnds = [...sub.matchAll(/[.!?]\s/g)];
+      if (sentenceEnds.length > 0) {
+        const lastMatch = sentenceEnds[sentenceEnds.length - 1];
+        splitIndex = (lastMatch.index || 0) + 1;
+      }
+    }
+
+    // Then space
+    if (splitIndex === -1 || splitIndex < limit * 0.3) {
+      const spaceIndex = sub.lastIndexOf(' ');
+      if (spaceIndex > limit * 0.3) splitIndex = spaceIndex;
+    }
+
+    // Absolute fallback
+    if (splitIndex === -1 || splitIndex < limit * 0.3) {
+      splitIndex = limit;
+    }
+
+    chunks.push(remainingText.substring(0, splitIndex).trim());
+    remainingText = remainingText.substring(splitIndex).trim();
+  }
+
+  return chunks;
+}
+
 export async function unifiedTranslate(
   text: string,
   fromLang: string,
@@ -120,33 +196,55 @@ export async function unifiedTranslate(
     return translationCache.get(cacheKey)!;
   }
 
-  // 7. VALIDAÇÃO DE RESPOSTA (isValidTranslation)
-  const isValidTranslation = (original: string, translated: string | null | undefined): boolean => {
-    if (!translated || translated.trim() === "") return false;
-    const cleanOrig = original.trim().toLowerCase();
-    const cleanTrans = translated.trim().toLowerCase();
+  // Handle Long Text (Chunking)
+  const MAX_CHAR_LIMIT = 4500;
+  if (text.length > MAX_CHAR_LIMIT) {
+    const chunks = splitIntoChunks(text, MAX_CHAR_LIMIT);
+    const translatedChunks: string[] = [];
+    let isServerSource = true;
 
-    // 1. Proibir frases iguais ao original (para textos longos)
-    if (original.length > 3 && cleanOrig === cleanTrans) return false;
-
-    // 2. Proibir explicações comuns da IA
-    const hallucinations = ['here is the translation', 'tradução:', 'the translation is', 'translated to', 'claro, aqui está', 'tradução fiel:'];
-    if (hallucinations.some(h => cleanTrans.includes(h))) return false;
-
-    // 3. Validação de Comprimento Heurística
-    if (original.length > 20) {
-       const ratio = translated.length / original.length;
-       if (ratio < 0.2 || ratio > 5) return false;
+    for (let i = 0; i < chunks.length; i++) {
+      // Small delay between chunks to avoid rate limits
+      if (i > 0) await new Promise(r => setTimeout(r, 200));
+      
+      const chunkResult = await unifiedTranslate(chunks[i], fromLang, toLang, {
+        ...settings,
+        // We bypass cache for sub-chunks to avoid key collision if same short text appears twice
+        // actually recursive call will handle its own cache
+      });
+      translatedChunks.push(chunkResult.text);
+      if (chunkResult.source === 'client') isServerSource = false;
     }
 
-    return true;
-  };
+    const finalResult: TranslationResult = {
+      text: translatedChunks.join('\n\n'),
+      source: isServerSource ? 'server' : 'client'
+    };
+    translationCache.set(cacheKey, finalResult);
+    return finalResult;
+  }
 
   // Helper to attempt a translation with specific parameters
   async function performTranslation(currentEngine: 'gemini' | 'openai', forceNormal: boolean = false): Promise<TranslationResult> {
+    const activeStyle = forceNormal ? 'normal' : settings.translationStyle;
     const activeFluent = forceNormal ? false : (currentEngine === 'openai' ? fluentMode : false);
     
-    // 1. Try Server-side API first
+    // Gemini: Always Client-side (Skill Constraint)
+    if (currentEngine === 'gemini') {
+      try {
+        const geminiModel = "models/gemini-1.5-flash"; 
+        const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeFluent, activeStyle), 15000);
+        if (isValidTranslation(text, resultText)) {
+          return { text: resultText, source: 'client' };
+        }
+        throw new Error('GEMINI_CLIENT_INVALID');
+      } catch (clientErr: any) {
+        handleApiError(clientErr, `ClientSide_Gemini`);
+        throw clientErr;
+      }
+    }
+
+    // OpenAI: Try Server-side first
     try {
       const response = await withTimeout(fetch('/api/translate', {
         method: 'POST',
@@ -158,7 +256,7 @@ export async function unifiedTranslate(
           engine: currentEngine, 
           model, 
           fluentMode: activeFluent,
-          geminiApiKey,
+          translationStyle: activeStyle,
           openaiApiKey
         })
       }), 15000);
@@ -173,25 +271,18 @@ export async function unifiedTranslate(
     } catch (error: any) {
       handleApiError(error, `ServerSide_${currentEngine}`);
       
-      // 2. Client-side Fallback
+      // OpenAI Client-side Fallback
       try {
-        let resultText = '';
-        if (currentEngine === 'gemini') {
-          const geminiModel = "models/gemini-1.5-flash";
-          // Gemini NUNCA usa modo fluente
-          resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, false), 15000);
-        } else {
-          const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
-          resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, activeFluent), 15000);
-        }
+        const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
+        const resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, activeFluent), 15000);
 
         if (isValidTranslation(text, resultText)) {
           return { text: resultText, source: 'client' };
         }
-        throw new Error('CLIENT_INVALID_OR_EMPTY');
+        throw new Error('OPENAI_CLIENT_INVALID');
       } catch (clientErr: any) {
-        handleApiError(clientErr, `ClientSide_${currentEngine}`);
-        throw clientErr; // Bubbles up to trigger next AI or local
+        handleApiError(clientErr, `ClientSide_${currentEngine}_Fallback`);
+        throw clientErr; 
       }
     }
   }
@@ -245,4 +336,35 @@ export async function unifiedSpeak(
   // Currently only Gemini supports TTS in our implementation
   // Ensure we use a valid model name for multimodal TTS
   return speakWithGemini(text, settings.geminiApiKey, voiceName);
+}
+
+/**
+ * Detect language using Gemini (client-side)
+ */
+export async function detectLanguage(text: string, settings: AppSettings): Promise<string | null> {
+  if (!text || text.trim().length < 3) return null;
+
+  try {
+    const { translateWithGemini } = await import('./gemini');
+    // We use a specific prompt for detection
+    const prompt = `Identify the language of the following text. 
+Return ONLY the ISO 639-1 two-letter code (e.g., 'pt', 'en', 'es', 'fr').
+If you cannot identify it, return 'unknown'.
+
+Text: ${text.substring(0, 100)}`;
+
+    const genAI = (await import('./gemini')).getGeminiClient(settings.geminiApiKey);
+    const model = genAI.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt
+    });
+
+    const response = await model;
+    const code = response.text.trim().toLowerCase();
+    
+    return code === 'unknown' ? null : code;
+  } catch (error) {
+    console.error('Language detection error:', error);
+    return null;
+  }
 }

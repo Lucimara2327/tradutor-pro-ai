@@ -38,6 +38,8 @@ export default function App() {
       model: 'gemini-1.5-flash',
       engine: 'gemini',
       fluentMode: true,
+      comparisonMode: false,
+      translationStyle: 'normal',
     };
     
     if (saved) {
@@ -49,6 +51,12 @@ export default function App() {
       }
       if (parsed.fluentMode === undefined) {
         parsed.fluentMode = true;
+      }
+      if (parsed.comparisonMode === undefined) {
+        parsed.comparisonMode = false;
+      }
+      if (parsed.translationStyle === undefined) {
+        parsed.translationStyle = 'normal';
       }
       if (parsed.model.includes('gemini')) {
         parsed.model = 'gemini-1.5-flash';
