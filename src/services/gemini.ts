@@ -19,6 +19,8 @@ export function getGeminiClient(key?: string): any {
   return geminiClient.client;
 }
 
+let ttsCircuitBreaker: number = 0;
+
 /**
  * High-quality Text-to-Speech using Gemini 3.1 Flash TTS
  */
@@ -27,6 +29,11 @@ export async function speakWithGemini(
   apiKey?: string,
   voiceName: 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr' = 'Kore'
 ): Promise<string> {
+  // Circuit breaker check (1 minute cooldown if quota hit)
+  if (Date.now() < ttsCircuitBreaker) {
+    throw new Error('TTS_SERVICE_COOLDOWN');
+  }
+
   const ai = getGeminiClient(apiKey);
   
   if (!text || !text.trim()) {
@@ -54,8 +61,23 @@ export async function speakWithGemini(
 
     return base64Audio;
   } catch (error: any) {
-    console.error('Gemini TTS error:', error);
-    throw error;
+    let errorMsg = error.message || String(error);
+    try {
+      if (typeof errorMsg === 'string' && errorMsg.startsWith('{')) {
+        const parsed = JSON.parse(errorMsg);
+        errorMsg = parsed.error?.message || parsed.message || errorMsg;
+      }
+    } catch (e) {}
+
+    // Handle Quota / Rate Limit
+    if (errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('rate limit') || errorMsg.toLowerCase().includes('exhausted')) {
+      console.warn('Gemini TTS Quota Exceeded. Activating circuit breaker for 60s.');
+      ttsCircuitBreaker = Date.now() + 60000; // 60 second cooldown
+      throw new Error('RATE_LIMIT');
+    }
+
+    console.error('Gemini TTS error:', errorMsg);
+    throw new Error(errorMsg);
   }
 }
 
