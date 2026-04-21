@@ -14,7 +14,7 @@ export default defineConfig(({mode, command}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+        includeAssets: ['pwa-icon.svg'],
         manifest: {
           name: 'Lumi Translate',
           short_name: 'Lumi',
@@ -26,15 +26,15 @@ export default defineConfig(({mode, command}) => {
           scope: '.',
           icons: [
             {
-              src: 'https://cdn-icons-png.flaticon.com/192/2800/2800015.png',
+              src: 'pwa-icon.svg',
               sizes: '192x192',
-              type: 'image/png',
+              type: 'image/svg+xml',
               purpose: 'any maskable'
             },
             {
-              src: 'https://cdn-icons-png.flaticon.com/512/2800/2800015.png',
+              src: 'pwa-icon.svg',
               sizes: '512x512',
-              type: 'image/png',
+              type: 'image/svg+xml',
               purpose: 'any maskable'
             }
           ]
