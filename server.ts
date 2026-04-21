@@ -17,7 +17,7 @@ async function startServer() {
 
   // API Route
   app.post('/api/translate', async (req, res) => {
-    const { text, fromLang, toLang, engine, model, fluentMode } = req.body;
+    const { text, fromLang, toLang, engine, model, fluentMode, geminiApiKey, openaiApiKey } = req.body;
     const isFluent = !!fluentMode;
 
     async function attemptTranslation(retryCount = 0): Promise<string> {
@@ -29,7 +29,7 @@ async function startServer() {
         let translated = '';
 
         if (engine === 'openai') {
-          const apiKey = process.env.OPENAI_API_KEY;
+          const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
           if (!apiKey) {
             throw new Error('OPENAI_API_KEY_NOT_CONFIGURED');
           }
@@ -69,13 +69,13 @@ Idioma destino: ${toLang}`;
 
           translated = response.choices[0]?.message?.content?.trim() || '';
         } else if (engine === 'gemini') {
-          const apiKey = process.env.GEMINI_API_KEY;
+          const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
           if (!apiKey) {
             throw new Error('GEMINI_API_KEY_NOT_CONFIGURED');
           }
 
           const ai = new GoogleGenAI({ apiKey });
-          const geminiModel = "models/gemini-1.5-flash";
+          const geminiModel = "gemini-3-flash-preview";
 
           const promptText = `Você é um tradutor rápido. Traduza de forma DIRETA e LITERAL.
 Regras:
@@ -91,9 +91,9 @@ ${text}`;
 
           const response = await ai.models.generateContent({
             model: geminiModel,
-            contents: [{ parts: [{ text: promptText }] }],
+            contents: promptText,
             config: {
-              temperature: 0.0, // Maximum deterministic speed and accuracy
+              temperature: 0,
             }
           });
 

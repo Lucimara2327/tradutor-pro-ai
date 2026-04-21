@@ -157,7 +157,9 @@ export async function unifiedTranslate(
           toLang, 
           engine: currentEngine, 
           model, 
-          fluentMode: activeFluent 
+          fluentMode: activeFluent,
+          geminiApiKey,
+          openaiApiKey
         })
       }), 15000);
 

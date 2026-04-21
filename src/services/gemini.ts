@@ -29,9 +29,13 @@ export async function speakWithGemini(
 ): Promise<string> {
   const ai = getGeminiClient(apiKey);
   
+  if (!text || !text.trim()) {
+    throw new Error('EMPTY_TEXT');
+  }
+
   try {
     const response = await ai.models.generateContent({
-      model: "models/gemini-1.5-flash",
+      model: "gemini-3.1-flash-tts-preview",
       contents: [{ parts: [{ text }] }],
       config: {
         responseModalities: [Modality.AUDIO],
@@ -66,7 +70,7 @@ export async function translateWithGemini(
   async function attempt(retryCount = 0): Promise<string> {
     try {
       const ai = getGeminiClient(apiKey);
-      const model = "models/gemini-1.5-flash";
+      const model = "gemini-3-flash-preview";
 
       const prompt = `Você é um tradutor rápido. Traduza de ${fromLang === 'auto' ? 'detectado' : fromLang} para ${toLang}.
 Regras:
@@ -81,9 +85,9 @@ ${text}`;
 
       const response = await ai.models.generateContent({
         model: model,
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: prompt,
         config: {
-          temperature: 0.0,
+          temperature: 0,
         }
       });
 
