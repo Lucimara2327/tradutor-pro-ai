@@ -18,7 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
-import { unifiedTranslate, unifiedSpeak, detectLanguage } from '@/src/services/translator';
+import { unifiedTranslate, unifiedSpeak, detectLanguage, isOpenAIAvailable } from '@/src/services/translator';
 import { cn } from '@/src/utils';
 
 interface TranslatorProps {
@@ -233,13 +233,20 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     setIsLoading(true);
     setError(null);
     setIsOutdated(false);
+    
+    // Limpar resultados anteriores para não reutilizar dados antigos em caso de erro
+    setTranslatedText("");
+    setComparisonResults(null);
+    
     const requestId = ++currentRequestIdRef.current;
     
     window.speechSynthesis.cancel();
     setIsSpeaking(false);
 
     try {
-      if (settings.comparisonMode) {
+      const isAvailable = isOpenAIAvailable();
+
+      if (settings.comparisonMode && isAvailable) {
         // AI Comparison Mode: Run both in parallel
         const [openaiRes, geminiRes] = await Promise.all([
           unifiedTranslate(inputText, fromLang, toLang, { ...settings, engine: 'openai' }),
@@ -253,8 +260,8 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           gemini: geminiRes.text
         });
 
-        // Use primary engine for main translated text (audio/persistence)
-        const primaryResult = settings.engine === 'openai' ? openaiRes : geminiRes;
+        // Use OpenAI as primary if fluentMode is active, otherwise respect selected engine
+        const primaryResult = (settings.fluentMode) ? openaiRes : (settings.engine === 'openai' ? openaiRes : geminiRes);
         setTranslatedText(primaryResult.text);
         setTranslationSource(primaryResult.source);
 
@@ -273,12 +280,14 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           speak(primaryResult.text, toLang);
         }
       } else {
-        // Normal Mode
+        // Normal Mode or OpenAI Disabled Fallback
         const result = await unifiedTranslate(
           inputText,
           fromLang,
           toLang,
-          settings
+          settings.fluentMode && !isAvailable 
+            ? { ...settings, engine: 'gemini' } 
+            : settings
         );
 
         if (requestId !== currentRequestIdRef.current) return;
@@ -304,7 +313,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       }
     } catch (err: any) {
       if (requestId !== currentRequestIdRef.current) return;
-      console.error('Catastrophic translation error handled:', err);
+      // Friendly message for the user, technical details stay in console
+      console.warn('[DEVELOPER_LOG] Catastrophic translation error:', err);
+      setError("O serviço de tradução está temporariamente indisponível. Tente novamente em instantes.");
     } finally {
       if (requestId === currentRequestIdRef.current) {
         setIsLoading(false);
@@ -549,7 +560,78 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   return (
-    <div className="mt-4 lg:mt-6 space-y-8 animate-in fade-in duration-700 pb-20 overflow-x-hidden px-1">
+    <div className="mt-2 lg:mt-4 space-y-8 animate-in fade-in duration-700 pb-20 overflow-x-hidden px-1">
+      {/* Toggles Row */}
+      <div className="flex flex-col items-center gap-3 px-2">
+        <AnimatePresence>
+          {!isOpenAIAvailable() && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="w-full max-w-[412px] overflow-hidden"
+            >
+              <div className="mb-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+                <Sparkles size={12} className="animate-pulse" />
+                <span>Serviço alternativo em uso para garantir funcionamento.</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        <div className="flex flex-wrap items-center justify-center gap-3 w-full">
+          <button
+            onClick={() => setSettings(prev => ({ ...prev, comparisonMode: !prev.comparisonMode }))}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest flex-1 max-w-[200px] justify-between",
+              settings.comparisonMode 
+                ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 shadow-sm shadow-blue-500/5" 
+                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500 shadow-sm"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <ClipboardList size={14} className={cn(settings.comparisonMode && "animate-pulse")} />
+              <span>Comparação IA</span>
+            </div>
+            <div className={cn(
+              "w-7 h-3.5 rounded-full relative transition-all",
+              settings.comparisonMode ? "bg-blue-500" : "bg-slate-300 dark:bg-zinc-700"
+            )}>
+              <div className={cn(
+                "absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all",
+                settings.comparisonMode ? "left-4" : "left-0.5"
+              )} />
+            </div>
+          </button>
+
+          <button
+            onClick={() => setSettings(prev => ({ ...prev, fluentMode: !prev.fluentMode }))}
+            disabled={settings.engine !== 'openai' && !settings.comparisonMode}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest flex-1 max-w-[200px] justify-between",
+              settings.fluentMode 
+                ? "bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400 shadow-sm shadow-purple-500/5" 
+                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500 shadow-sm",
+              (settings.engine !== 'openai' && !settings.comparisonMode) && "opacity-30 cursor-not-allowed grayscale"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className={cn(settings.fluentMode && "animate-pulse")} />
+              <span>Fluente Nativo</span>
+            </div>
+            <div className={cn(
+              "w-7 h-3.5 rounded-full relative transition-all",
+              settings.fluentMode ? "bg-purple-500" : "bg-slate-300 dark:bg-zinc-700"
+            )}>
+              <div className={cn(
+                "absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all",
+                settings.fluentMode ? "left-4" : "left-0.5"
+              )} />
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* Hidden Inputs */}
       <input 
         type="file" 
@@ -627,9 +709,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         </div>
       </div>
     
-      {/* Erro amigável se idiomas forem iguais */}
+      {/* Erro amigável */}
       <AnimatePresence>
-        {error && (fromLang === toLang && fromLang !== 'auto') && (
+        {error && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -641,28 +723,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           </motion.div>
         )}
       </AnimatePresence>
-      {/* Seleção de Estilo */}
-      <div className="flex flex-wrap items-center justify-center gap-2 px-2">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-500 mr-2">Estilo:</span>
-        {(['normal', 'fluent', 'formal', 'informal'] as const).map((style) => (
-          <button
-            key={style}
-            onClick={() => setSettings(prev => ({ ...prev, translationStyle: style }))}
-            className={cn(
-              "px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border",
-              settings.translationStyle === style
-                ? "bg-[#7B3FE4] border-[#7B3FE4] text-white shadow-lg shadow-[#7B3FE4]/20 scale-105"
-                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/10 text-slate-500 hover:border-[#7B3FE4]/50"
-            )}
-          >
-            {style === 'normal' && 'Normal'}
-            {style === 'fluent' && 'Fluente'}
-            {style === 'formal' && 'Formal'}
-            {style === 'informal' && 'Informal'}
-          </button>
-        ))}
-      </div>
-
       <AnimatePresence>
         {isOutdated && translatedText && (
           <motion.div
@@ -678,54 +738,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           </motion.div>
         )}
       </AnimatePresence>
-
-      <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-3 px-2">
-        <button
-          onClick={() => setSettings(prev => ({ ...prev, comparisonMode: !prev.comparisonMode }))}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest",
-            settings.comparisonMode 
-              ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 shadow-sm shadow-blue-500/5" 
-              : "bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500"
-          )}
-        >
-          <ClipboardList size={14} className={cn(settings.comparisonMode && "animate-pulse")} />
-          <span>Modo Comparação de IA {settings.comparisonMode ? 'Ativado' : 'Desativado'}</span>
-          <div className={cn(
-            "w-8 h-4 rounded-full relative transition-all ml-1",
-            settings.comparisonMode ? "bg-blue-500" : "bg-slate-300 dark:bg-zinc-700"
-          )}>
-            <div className={cn(
-              "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all",
-              settings.comparisonMode ? "left-4.5" : "left-0.5"
-            )} />
-          </div>
-        </button>
-
-        {settings.engine === 'openai' && !settings.comparisonMode && (
-          <button
-            onClick={() => setSettings(prev => ({ ...prev, fluentMode: !prev.fluentMode }))}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest",
-              settings.fluentMode 
-                ? "bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400 shadow-sm shadow-purple-500/5" 
-                : "bg-slate-50 dark:bg-zinc-800/40 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500"
-            )}
-          >
-            <Sparkles size={14} className={cn(settings.fluentMode && "animate-pulse")} />
-            <span>Modo Fluente {settings.fluentMode ? 'Ativado' : 'Desativado'}</span>
-            <div className={cn(
-              "w-8 h-4 rounded-full relative transition-all ml-1",
-              settings.fluentMode ? "bg-purple-500" : "bg-slate-300 dark:bg-zinc-700"
-            )}>
-              <div className={cn(
-                "absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all",
-                settings.fluentMode ? "left-4.5" : "left-0.5"
-              )} />
-            </div>
-          </button>
-        )}
-      </div>
 
       {/* 2. MEIO: Caixa de texto */}
       <div className="space-y-4">

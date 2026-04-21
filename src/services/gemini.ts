@@ -99,24 +99,31 @@ export async function translateWithGemini(
 
       let styleInstruction = "";
       if (style === 'fluent') {
-        styleInstruction = "2. Estilo FLUENTE: Deixe a frase mais natural, como um falante nativo diria, sem alterar demais o sentido original.";
+        styleInstruction = "- FLUENTE: natural, mas sem alterar sentido.";
       } else if (style === 'formal') {
-        styleInstruction = "2. Estilo FORMAL: Use linguagem educada e mais completa.";
+        styleInstruction = "- FORMAL: linguagem educada e correta.";
       } else if (style === 'informal') {
-        styleInstruction = "2. Estilo INFORMAL: Use linguagem simples, leve e comum no dia a dia.";
+        styleInstruction = "- INFORMAL: linguagem leve e comum.";
       } else {
-        styleInstruction = "2. Estilo NORMAL: Tradução fiel e direta.";
+        styleInstruction = "- NORMAL: tradução direta e fiel.";
       }
 
-      const prompt = `Traduza de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang} em nível PROFISSIONAL.
-Regras:
-1. Preserve o SIGNIFICADO original da frase acima de tudo.
-${styleInstruction}
-3. Corrija gramática do original, mas NÃO exagere na reescrita.
-4. Evite mudar demais a estrutura quando não for necessário.
-5. Retorne APENAS o texto traduzido final, SEM aspas e SEM explicações.
+      const prompt = `Traduza o texto de forma precisa e segura de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang}.
 
-Texto:
+Regras obrigatórias:
+- NÃO inventar conteúdo.
+- NÃO adicionar palavras que não existem no original.
+- NÃO usar linguagem ofensiva.
+- Manter o significado original da frase.
+- Adaptar levemente apenas para soar natural.
+- Se a frase for simples, manter a tradução simples.
+
+Estilo solicitado:
+${styleInstruction}
+
+IMPORTANTE: Retorne APENAS o texto traduzido final, SEM aspas e SEM explicações.
+
+Texto para traduzir:
 ${text}`;
 
       const response = await ai.models.generateContent({

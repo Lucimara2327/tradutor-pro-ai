@@ -30,27 +30,26 @@ export async function translateText(
     try {
       const isFluent = !!fluentMode;
 
-      const normalPrompt = `Você é um tradutor PRO. Traduza o texto de forma DIRETA, LITERAL e FIEL. 
-REGRAS:
-- PRIORIDADE: Tradução literal absoluta.
-- AMBIGUIDADE: Use o significado mais comum.
-- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
-Idioma destino: ${toLang}`;
+      const systemPrompt = `Traduza o texto de forma precisa e segura para o idioma de destino: ${toLang}.
 
-      const fluentPrompt = `Você é um tradutor PRO inteligente. Traduza o texto de forma NATURAL e FLUENTE.
-REGRAS:
-- FLUIDEZ: Melhore levemente a concordância e naturalidade.
-- FIDELIDADE: Mantenha o significado e intenção original intactos.
-- AMBIGUIDADE: Use o significado mais comum.
-- RESPOSTA: Apenas a tradução, sem aspas ou explicações.
-Idioma destino: ${toLang}`;
+Regras obrigatórias:
+- NÃO inventar conteúdo.
+- NÃO adicionar palavras que não existem no original.
+- NÃO usar linguagem ofensiva.
+- Manter o significado original da frase.
+- Adaptar levemente apenas para soar natural.
+- Se a frase for simples, manter a tradução simples.
+
+Estilo: ${isFluent ? 'FLUENTE (natural, mas sem alterar sentido)' : 'NORMAL (tradução direta e fiel)'}
+
+IMPORTANTE: Retorne APENAS a tradução final, sem aspas e sem explicações.`;
 
       const response = await client.chat.completions.create({
         model: model,
         messages: [
           {
             role: 'system',
-            content: isFluent ? fluentPrompt : normalPrompt
+            content: systemPrompt
           },
           {
             role: 'user',
@@ -69,7 +68,9 @@ Idioma destino: ${toLang}`;
     } catch (error: any) {
       if (retryCount < 1) return await attempt(retryCount + 1);
       
-      console.error('OpenAI attempt failed:', error.message || error);
+      if (error.status !== 429) {
+        console.warn('OpenAI attempt failed:', error.message || error);
+      }
       
       if (error.status === 401) {
         throw new Error('INVALID_KEY');

@@ -38,14 +38,14 @@ async function startServer() {
       const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
 
       let styleInstruction = "";
-      if (style === 'fluent') {
-        styleInstruction = "- Estilo FLUENTE: Deixe a frase mais natural, como um falante nativo diria, sem alterar demais o sentido original.";
+      if (isFluent) {
+        styleInstruction = "- FLUENTE: natural, mas sem alterar sentido.";
       } else if (style === 'formal') {
-        styleInstruction = "- Estilo FORMAL: Use linguagem educada e mais completa, adequada para situações formais.";
+        styleInstruction = "- FORMAL: linguagem educada e correta.";
       } else if (style === 'informal') {
-        styleInstruction = "- Estilo INFORMAL: Use linguagem simples, leve e comum no dia a dia.";
+        styleInstruction = "- INFORMAL: linguagem leve e comum.";
       } else {
-        styleInstruction = "- Estilo NORMAL: Realize uma tradução fiel e direta, mantendo o significado original.";
+        styleInstruction = "- NORMAL: tradução direta e fiel.";
       }
 
       const response = await openai.chat.completions.create({
@@ -53,20 +53,27 @@ async function startServer() {
         messages: [
           {
             role: 'system',
-            content: `Você é um tradutor nível profissional. 
-Regras:
-- NÃO traduza palavra por palavra, mas FOQUE em preservar o significado original.
+            content: `Traduza o texto de forma precisa e segura para o idioma de destino.
+
+Regras obrigatórias:
+- NÃO inventar conteúdo.
+- NÃO adicionar palavras que não existem no original.
+- NÃO usar linguagem ofensiva.
+- Manter o significado original da frase.
+- Adaptar levemente apenas para soar natural.
+- Se a frase for simples, manter a tradução simples.
+
+Estilo solicitado:
 ${styleInstruction}
-- NÃO exagere na reescrita; evite mudar demais a estrutura se não for estritamente necessário.
-- Corrija eventuais erros gramaticais do texto original durante a tradução.
-- Retorne APENAS a tradução final, sem aspas e sem explicações.`
+
+IMPORTANTE: Retorne APENAS a tradução final, sem aspas e sem explicações.`
           },
           {
             role: 'user',
             content: text,
           },
         ],
-        temperature: style === 'informal' ? 0.5 : 0.3,
+        temperature: style === 'informal' ? 0.3 : 0.1,
       });
 
       const translatedText = response.choices[0]?.message?.content?.trim() || '';
@@ -77,11 +84,16 @@ ${styleInstruction}
 
       return res.json({ translatedText });
     } catch (error: any) {
-      console.error('Server translation error:', error);
+      const isRateLimit = error.status === 429 || (error.message && (error.message.includes('quota') || error.message.includes('Rate limit')));
+      
+      if (isRateLimit) {
+        console.warn('[SERVER_QUOTA] OpenAI quota exceeded or rate limit hit. Notifying frontend.');
+      } else {
+        console.error('Server translation error:', error);
+      }
       
       const errorMsg = error.message || String(error);
       const isInvalidKey = errorMsg.includes('API key not valid') || errorMsg.includes('INVALID_KEY') || error.status === 401;
-      const isRateLimit = errorMsg.includes('quota exceeded') || errorMsg.includes('Rate limit') || error.status === 429;
       
       res.status(isInvalidKey ? 401 : (isRateLimit ? 429 : 500)).json({ 
         error: errorMsg,
