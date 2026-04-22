@@ -1,83 +1,133 @@
 
 import React, { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Languages, History, Settings, Star, Info, MoreHorizontal, ChevronUp, ArrowLeft } from 'lucide-react';
+import { 
+  Languages, 
+  History, 
+  Settings, 
+  Star, 
+  Info, 
+  MoreVertical, 
+  ChevronUp, 
+  ArrowLeft,
+  Sliders,
+  ClipboardList,
+  Camera,
+  Image as ImageIcon,
+  Home,
+  X
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/utils';
+import { AppSettings } from '@/src/types';
 import AppInfo from './AppInfo';
 
-export default function Layout() {
+interface LayoutProps {
+  settings: AppSettings;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+}
+
+export default function Layout({ settings, setSettings }: LayoutProps) {
   const [isAppInfoOpen, setIsAppInfoOpen] = useState(false);
-  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
+  const [isQuickSettingsOpen, setIsQuickSettingsOpen] = useState(false);
+  const [isMainMenuOpen, setIsMainMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   const isHome = location.pathname === '/';
-  const isOptionsActive = location.pathname !== '/';
+
+  const handleMenuAction = (action: string) => {
+    setIsMainMenuOpen(false);
+    
+    switch (action) {
+      case 'home':
+        navigate('/');
+        break;
+      case 'favorites':
+        navigate('/favorites');
+        break;
+      case 'history':
+        navigate('/history');
+        break;
+      case 'settings':
+        navigate('/settings');
+        break;
+      case 'camera':
+        if (!isHome) navigate('/');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('lumi:open-camera')), 100);
+        break;
+      case 'gallery':
+        if (!isHome) navigate('/');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('lumi:open-gallery')), 100);
+        break;
+    }
+  };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-main)] text-[var(--text-main)] transition-colors duration-300">
-      {/* Options Menu Modal/Overlay */}
+      {/* App Info Modal */}
+      <AppInfo isOpen={isAppInfoOpen} onClose={() => setIsAppInfoOpen(false)} />
+      
+      {/* Minimalist Main Menu Ribbon */}
       <AnimatePresence>
-        {isOptionsMenuOpen && (
+        {isMainMenuOpen && (
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsOptionsMenuOpen(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] lg:hidden"
+              onClick={() => setIsMainMenuOpen(false)}
+              className="fixed inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-[2px] z-[100]"
             />
             <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="fixed bottom-24 left-1/2 -translate-x-1/2 w-[90%] max-w-[320px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-[32px] p-2 z-[70] lg:hidden shadow-2xl overflow-hidden"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="fixed top-24 right-6 w-16 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-xl border border-slate-200 dark:border-white/10 rounded-full z-[101] py-4 shadow-2xl flex flex-col items-center gap-4"
             >
-              <div className="flex flex-col gap-1">
-                <div className="px-5 py-3 mb-1 flex items-center">
-                  <button 
-                    onClick={() => { navigate('/'); setIsOptionsMenuOpen(false); }}
-                    className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-[#7B3FE4] hover:bg-slate-50 dark:hover:bg-zinc-800 transition-all active:scale-90"
-                  >
-                    <ArrowLeft size={22} />
-                  </button>
-                </div>
-                
-                <MobileMenuOption 
-                  icon={<Star size={20} />} 
-                  label="Favoritos" 
-                  onClick={() => { navigate('/favorites'); setIsOptionsMenuOpen(false); }}
-                  active={location.pathname === '/favorites'}
-                />
-
-                <MobileMenuOption 
-                  icon={<History size={20} />} 
-                  label="Histórico" 
-                  onClick={() => { navigate('/history'); setIsOptionsMenuOpen(false); }}
-                  active={location.pathname === '/history'}
-                />
-                <MobileMenuOption 
-                  icon={<Settings size={20} />} 
-                  label="Ajustes" 
-                  onClick={() => { navigate('/settings'); setIsOptionsMenuOpen(false); }}
-                  active={location.pathname === '/settings'}
-                />
-
-                <button 
-                  onClick={() => setIsOptionsMenuOpen(false)}
-                  className="mt-2 w-full py-4 bg-slate-50 dark:bg-zinc-800/50 text-slate-500 font-bold text-[11px] uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2"
-                >
-                  <ChevronUp className="rotate-180" size={14} />
-                  Fechar
-                </button>
-              </div>
+              <IconButton 
+                icon={<Camera size={20} />} 
+                title="Câmera" 
+                onClick={() => handleMenuAction('camera')} 
+              />
+              <IconButton 
+                icon={<ImageIcon size={20} />} 
+                title="Galeria" 
+                onClick={() => handleMenuAction('gallery')} 
+              />
+              <div className="w-8 h-px bg-slate-200 dark:bg-white/10 my-1" />
+              <IconButton 
+                icon={<Star size={20} />} 
+                title="Favoritos" 
+                onClick={() => handleMenuAction('favorites')} 
+              />
+              <IconButton 
+                icon={<History size={20} />} 
+                title="Histórico" 
+                onClick={() => handleMenuAction('history')} 
+              />
+              <IconButton 
+                icon={<Settings size={20} />} 
+                title="Ajustes" 
+                onClick={() => handleMenuAction('settings')} 
+              />
+              <IconButton 
+                icon={<Home size={20} />} 
+                title="Início" 
+                onClick={() => handleMenuAction('home')} 
+              />
+              <div className="w-8 h-px bg-slate-200 dark:bg-white/10 my-1" />
+              <IconButton 
+                icon={<X size={20} />} 
+                title="Fechar" 
+                onClick={() => setIsMainMenuOpen(false)}
+                variant="danger"
+              />
             </motion.div>
           </>
         )}
       </AnimatePresence>
-      {/* App Info Modal */}
-      <AppInfo isOpen={isAppInfoOpen} onClose={() => setIsAppInfoOpen(false)} />
+
       {/* Sidebar - Desktop */}
       <aside className="w-[280px] bg-[var(--sidebar-bg)] border-r border-[var(--card-border)] flex flex-col p-6 hidden lg:flex shrink-0">
         <div className="flex items-center gap-3 mb-10">
@@ -121,12 +171,98 @@ export default function Layout() {
             <h2 className="text-sm font-bold uppercase tracking-[2px] opacity-50">Espaço de Trabalho</h2>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
              <button 
                 onClick={() => setIsAppInfoOpen(true)}
-                className="p-2 rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700 hover:text-[#7B3FE4] transition-all"
+                className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700 hover:text-[#7B3FE4] transition-all active:scale-95"
+                title="Informações"
              >
-                <Info size={18} />
+                <Info size={20} />
+             </button>
+
+             {/* Quick Settings Action */}
+             <div className="relative">
+                <button 
+                    onClick={() => setIsQuickSettingsOpen(!isQuickSettingsOpen)}
+                    className={cn(
+                      "p-2.5 rounded-xl transition-all active:scale-95",
+                      isQuickSettingsOpen 
+                        ? "bg-[#7B3FE4] text-white shadow-lg shadow-purple-500/20" 
+                        : "bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700 hover:text-[#7B3FE4]"
+                    )}
+                    title="Configurações Rápidas"
+                >
+                    <Sliders size={20} />
+                </button>
+
+                <AnimatePresence>
+                  {isQuickSettingsOpen && (
+                    <>
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setIsQuickSettingsOpen(false)}
+                        className="fixed inset-0 z-40 bg-transparent"
+                      />
+                      
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute right-0 mt-3 w-64 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-[32px] shadow-2xl z-50 overflow-hidden p-4"
+                      >
+                        <div className="flex flex-col gap-4">
+                          <h3 className="text-[10px] font-black uppercase tracking-[3px] text-slate-400 mb-1 px-1 text-center">Modo de Tradução</h3>
+                          
+                          <button
+                            onClick={() => setSettings(prev => ({ ...prev, comparisonMode: !prev.comparisonMode }))}
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-2xl transition-all border w-full text-left",
+                              settings.comparisonMode 
+                                ? "bg-blue-500/5 border-blue-500/20 text-blue-600 dark:text-blue-400" 
+                                : "bg-slate-50 dark:bg-white/5 border-transparent text-slate-500"
+                            )}
+                          >
+                            <div className={cn(
+                              "p-2 rounded-xl transition-colors",
+                              settings.comparisonMode ? "bg-blue-500 text-white" : "bg-slate-200 dark:bg-zinc-800 text-slate-400"
+                            )}>
+                              <ClipboardList size={16} />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-[11px] font-black uppercase tracking-wider">Comparação IA</p>
+                              <p className="text-[9px] opacity-60 leading-tight mt-0.5 font-bold">Múltiplos modelos</p>
+                            </div>
+                            <div className={cn(
+                              "w-7 h-4 rounded-full relative transition-all bg-slate-200 dark:bg-zinc-800 shrink-0",
+                              settings.comparisonMode && "bg-blue-500"
+                            )}>
+                              <motion.div 
+                                className="absolute top-1 w-2 h-2 bg-white rounded-full transition-all"
+                                animate={{ left: settings.comparisonMode ? 16 : 4 }}
+                              />
+                            </div>
+                          </button>
+                        </div>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+             </div>
+
+             {/* Main Menu Action */}
+             <button 
+                onClick={() => setIsMainMenuOpen(!isMainMenuOpen)}
+                className={cn(
+                  "p-2.5 rounded-xl transition-all active:scale-95",
+                  isMainMenuOpen 
+                    ? "bg-[#7B3FE4] text-white shadow-lg shadow-purple-500/20" 
+                    : "bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700 hover:text-[#7B3FE4]"
+                )}
+                title="Menu Principal"
+             >
+                <MoreVertical size={20} />
              </button>
           </div>
         </header>
@@ -149,40 +285,25 @@ export default function Layout() {
               <span className="hover:text-[#7B3FE4] cursor-pointer transition-colors">v1.1.0-STABLE</span>
            </div>
         </footer>
-
-        {/* Mobile FAB - Bottom Right */}
-        <div className="lg:hidden fixed bottom-5 right-5 z-50">
-          <motion.button 
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.9 }}
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            onClick={() => setIsOptionsMenuOpen(true)}
-            className={cn(
-              "flex items-center justify-center w-14 h-14 rounded-full shadow-2xl transition-all duration-300 relative group overflow-hidden",
-              isOptionsActive 
-                ? "bg-[#7B3FE4] text-white shadow-purple-500/40" 
-                : "bg-white dark:bg-zinc-900 text-slate-400 dark:text-zinc-500 shadow-black/10 border border-slate-200 dark:border-white/10 hover:text-[#7B3FE4]"
-            )}
-          >
-            <MoreHorizontal size={28} className={cn("transition-transform duration-500", isOptionsMenuOpen && "rotate-90")} />
-            
-            {/* Click Ripple Effect Placeholder - Simple Scale */}
-            <span className="absolute inset-0 bg-white/10 opacity-0 group-active:opacity-100 transition-opacity" />
-            
-            {/* Visual indicator for menu being open */}
-            {isOptionsMenuOpen && (
-              <motion.div 
-                layoutId="menu-indicator"
-                className="absolute -top-1 w-1.5 h-1.5 bg-[#7B3FE4] rounded-full"
-                animate={{ y: [0, -5, 0] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-              />
-            )}
-          </motion.button>
-        </div>
       </div>
     </div>
+  );
+}
+
+function IconButton({ icon, title, onClick, variant = 'default' }: { icon: React.ReactNode; title: string; onClick: () => void; variant?: 'default' | 'danger' }) {
+  return (
+    <button 
+      onClick={onClick}
+      title={title}
+      className={cn(
+        "p-3.5 rounded-2xl transition-all duration-300 active:scale-90 shadow-sm",
+        variant === 'default' 
+          ? "bg-slate-50 dark:bg-zinc-800 text-slate-500 hover:bg-[#7B3FE4] hover:text-white" 
+          : "bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white"
+      )}
+    >
+      {icon}
+    </button>
   );
 }
 

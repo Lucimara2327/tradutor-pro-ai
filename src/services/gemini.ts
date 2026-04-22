@@ -87,10 +87,9 @@ export async function translateWithGemini(
   toLang: string,
   apiKey?: string,
   _ignoredModel: string = 'gemini-1.5-flash',
-  fluentMode: boolean = false,
   translationStyle: 'normal' | 'fluent' | 'formal' | 'informal' = 'normal'
 ): Promise<string> {
-  const style = translationStyle || (fluentMode ? 'fluent' : 'normal');
+  const style = translationStyle;
 
   async function attempt(retryCount = 0): Promise<string> {
     try {
@@ -99,13 +98,18 @@ export async function translateWithGemini(
 
       let styleInstruction = "";
       if (style === 'fluent') {
-        styleInstruction = "- FLUENTE: natural, mas sem alterar sentido.";
+        styleInstruction = `
+- MODO FLUENTE (NATIVO): Sua prioridade é fazer o texto soar 100% natural, profissional e "nativo". 
+- Melhore a fluidez, a gramática e a conexão entre as frases. 
+- Substitua traduções literais por expressões equivalentes mais comuns no idioma de destino.
+- Mantenha rigorosamente o tom original (se for formal, mantenha formal; se for casual/gíria, mantenha casual).
+- NÃO altere o significado original, apenas a forma como é expresso.`;
       } else if (style === 'formal') {
-        styleInstruction = "- FORMAL: linguagem educada e correta.";
+        styleInstruction = "- FORMAL: Use uma linguagem educada, correta e profissional (você/senhor).";
       } else if (style === 'informal') {
-        styleInstruction = "- INFORMAL: linguagem leve e comum.";
+        styleInstruction = "- INFORMAL: Use uma linguagem leve, comum e gírias apropriadas ao contexto.";
       } else {
-        styleInstruction = "- NORMAL: tradução direta e fiel.";
+        styleInstruction = "- NORMAL: Tradução direta, precisa e fiel ao texto base.";
       }
 
       const prompt = `Traduza o texto de forma precisa e segura de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang}.

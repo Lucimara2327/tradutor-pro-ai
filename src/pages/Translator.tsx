@@ -13,19 +13,138 @@ import {
   Loader2,
   Mic,
   MicOff,
-  ClipboardList
+  ClipboardList,
+  Pause,
+  Play,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
 import { unifiedTranslate, unifiedSpeak, detectLanguage, isOpenAIAvailable } from '@/src/services/translator';
-import { cn } from '@/src/utils';
+import { cn, splitLongText } from '@/src/utils';
 
 interface TranslatorProps {
   settings: AppSettings;
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   addTranslation: (t: Translation) => void;
 }
+
+const AudioControls = ({ 
+  state, 
+  onPlay, 
+  onPause, 
+  onResume, 
+  onStop,
+  speed,
+  onSpeedChange,
+  variant = 'default' 
+}: { 
+  state: 'idle' | 'playing' | 'paused' | 'loading';
+  onPlay: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+  speed: number;
+  onSpeedChange: (s: number) => void;
+  variant?: 'default' | 'minimal';
+}) => {
+  const speeds = [0.75, 1, 1.25, 1.5];
+
+  if (state === 'loading') {
+    return (
+      <button className="p-3.5 bg-slate-100 dark:bg-zinc-800 text-[#7B3FE4] rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm animate-pulse">
+        <Loader2 size={20} className="animate-spin" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {/* Speed Selector */}
+      {variant === 'default' && (
+        <div className="flex items-center bg-slate-100 dark:bg-zinc-800 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 h-[52px]">
+          {speeds.map((s) => (
+            <button
+              key={s}
+              onClick={() => onSpeedChange(s)}
+              className={cn(
+                "px-2.5 h-full text-[10px] font-black transition-all",
+                speed === s 
+                  ? "bg-[#7B3FE4] text-white" 
+                  : "text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700"
+              )}
+            >
+              {s}x
+            </button>
+          ))}
+        </div>
+      )}
+
+      {state === 'playing' ? (
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={onPause}
+            className="p-3.5 bg-[#7B3FE4] text-white rounded-2xl shadow-lg hover:scale-105 active:scale-95 transition-all"
+            title="Pausar"
+          >
+            <Pause size={20} />
+          </button>
+          {variant === 'default' && (
+            <button 
+              onClick={onStop}
+              className="p-3.5 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
+              title="Parar"
+            >
+              <Square size={20} fill="currentColor" />
+            </button>
+          )}
+        </div>
+      ) : state === 'paused' ? (
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={onResume}
+            className="p-3.5 bg-amber-500 text-white rounded-2xl shadow-lg hover:scale-105 active:scale-95 transition-all"
+            title="Retomar"
+          >
+            <Play size={20} fill="currentColor" />
+          </button>
+          <button 
+            onClick={onStop}
+            className="p-3.5 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
+            title="Parar"
+          >
+            <Square size={20} fill="currentColor" />
+          </button>
+        </div>
+      ) : (
+        <button 
+          onClick={onPlay}
+          className={cn(
+            "p-3.5 bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4] rounded-2xl hover:scale-105 active:scale-95 transition-all border border-slate-200 dark:border-white/10 shadow-sm",
+            variant === 'minimal' && "p-2 rounded-xl"
+          )}
+          title="Ouvir"
+        >
+          <Volume2 size={variant === 'minimal' ? 18 : 20} />
+        </button>
+      )}
+
+      {/* Minimal speed indicator if playing/paused in minimal mode */}
+      {variant === 'minimal' && (state === 'playing' || state === 'paused') && (
+        <button 
+          onClick={() => {
+            const nextIdx = (speeds.indexOf(speed) + 1) % speeds.length;
+            onSpeedChange(speeds[nextIdx]);
+          }}
+          className="px-2 py-1 bg-slate-100 dark:bg-zinc-800 text-[10px] font-black rounded-lg text-[#7B3FE4] border border-slate-200 dark:border-white/10"
+        >
+          {speed}x
+        </button>
+      )}
+    </div>
+  );
+};
 
 export default function Translator({ settings, setSettings, addTranslation }: TranslatorProps) {
   const [inputText, setInputText] = useState(() => localStorage.getItem('translator_inputText') || '');
@@ -44,6 +163,8 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [copied, setCopied] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isPolishing, setIsPolishing] = useState(false);
+  const [audioState, setAudioState] = useState<'idle' | 'playing' | 'paused' | 'loading'>('idle');
   const [translationSource, setTranslationSource] = useState<'server' | 'client' | null>(null);
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -60,6 +181,423 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const currentSpeechIdRef = useRef<number>(0);
   const currentRequestIdRef = useRef(0);
+
+  const stopGeminiAudio = () => {
+    if (currentAudioSourceRef.current) {
+      try {
+        currentAudioSourceRef.current.stop();
+      } catch (e) {
+        // Source might already be stopped
+      }
+      currentAudioSourceRef.current = null;
+    }
+    setAudioState('idle');
+    setIsSpeaking(false);
+  };
+
+  useEffect(() => {
+    const handleRemoteCamera = () => cameraInputRef.current?.click();
+    const handleRemoteGallery = () => fileInputRef.current?.click();
+
+    window.addEventListener('lumi:open-camera', handleRemoteCamera);
+    window.addEventListener('lumi:open-gallery', handleRemoteGallery);
+
+    return () => {
+      window.removeEventListener('lumi:open-camera', handleRemoteCamera);
+      window.removeEventListener('lumi:open-gallery', handleRemoteGallery);
+    };
+  }, []);
+
+  const handleAudioControl = async (action: 'play' | 'pause' | 'resume' | 'stop' | 'speed', text?: string, lang?: string, newSpeed?: number) => {
+    switch (action) {
+      case 'play':
+        if (text && lang) {
+          speak(text, lang);
+        }
+        break;
+      case 'pause':
+        if (audioContextRef.current && audioContextRef.current.state === 'running') {
+          await audioContextRef.current.suspend();
+          setAudioState('paused');
+        } else if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.pause();
+          setAudioState('paused');
+        }
+        break;
+      case 'resume':
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          await audioContextRef.current.resume();
+          setAudioState('playing');
+        } else if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+          setAudioState('playing');
+        }
+        break;
+      case 'stop':
+        window.speechSynthesis.cancel();
+        stopGeminiAudio();
+        break;
+      case 'speed':
+        if (newSpeed) {
+          setSettings(prev => ({ ...prev, audioSpeed: newSpeed }));
+          // If already playing Gemini audio, update playback rate live
+          if (currentAudioSourceRef.current) {
+            currentAudioSourceRef.current.playbackRate.value = newSpeed;
+          }
+        }
+        break;
+    }
+  };
+
+  const speak = async (text: string, langCode: string) => {
+    // 1. Cancel everything immediately
+    window.speechSynthesis.cancel();
+    stopGeminiAudio();
+    if (!text) return;
+
+    // 2. Track this request
+    const speechId = ++currentSpeechIdRef.current;
+    setIsSpeaking(true);
+    setAudioState('loading');
+
+    try {
+      // 3. Try high-quality Gemini TTS (async fetch)
+      const base64Data = await unifiedSpeak(text, settings);
+      
+      // 4. Critical check: did someone request a different audio while we were fetching?
+      if (speechId !== currentSpeechIdRef.current) {
+        console.log('Aborting play: newer speech request detected');
+        return;
+      }
+
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+
+      // Ensure context is running if it was suspended
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      const binaryString = atob(base64Data);
+      const len = binaryString.length;
+      const bytes = new Int16Array(len / 2);
+      for (let i = 0; i < len; i += 2) {
+        bytes[i / 2] = binaryString.charCodeAt(i) | (binaryString.charCodeAt(i + 1) << 8);
+      }
+
+      const audioBuffer = audioContextRef.current.createBuffer(1, bytes.length, 24000);
+      const channelData = audioBuffer.getChannelData(0);
+      for (let i = 0; i < bytes.length; i++) {
+        channelData[i] = bytes[i] / 32768.0;
+      }
+
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.playbackRate.value = settings.audioSpeed;
+      
+      const gainNode = audioContextRef.current.createGain();
+      gainNode.gain.value = 0.7;
+      
+      source.connect(gainNode);
+      gainNode.connect(audioContextRef.current.destination);
+      
+      source.onended = () => {
+        if (speechId === currentSpeechIdRef.current) {
+            setIsSpeaking(false);
+            setAudioState('idle');
+            currentAudioSourceRef.current = null;
+        }
+      };
+      
+      currentAudioSourceRef.current = source;
+      source.start();
+      setAudioState('playing');
+
+    } catch (error) {
+      if (speechId !== currentSpeechIdRef.current) return;
+
+      console.warn('Gemini TTS failed, falling back to system TTS', error);
+      const utterance = new SpeechSynthesisUtterance(text);
+      const targetLang = langCode === 'auto' ? 'pt-BR' : langCode;
+      utterance.lang = targetLang;
+      utterance.volume = 0.7;
+      utterance.rate = settings.audioSpeed;
+      utterance.pitch = 1.0;
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        const preferredVoice = voices.find(v => 
+          v.lang.startsWith(targetLang) && 
+          (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium'))
+        ) || voices.find(v => v.lang.startsWith(targetLang));
+        
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+      }
+
+      utterance.onstart = () => {
+        if (speechId === currentSpeechIdRef.current) {
+          setIsSpeaking(true);
+          setAudioState('playing');
+        }
+      };
+      utterance.onend = () => {
+        if (speechId === currentSpeechIdRef.current) {
+          setIsSpeaking(false);
+          setAudioState('idle');
+        }
+      };
+      utterance.onerror = () => {
+        if (speechId === currentSpeechIdRef.current) {
+          setIsSpeaking(false);
+          setAudioState('idle');
+        }
+      };
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  const handleTranslate = async (isPolish?: boolean) => {
+    if (!inputText.trim()) return;
+
+    if (fromLang !== 'auto' && fromLang === toLang) {
+      setError("Selecione idiomas diferentes para traduzir");
+      return;
+    }
+    
+    const applyFluency = !!isPolish;
+    
+    if (isPolish) {
+      setIsPolishing(true);
+    } else {
+      setIsLoading(true);
+    }
+    setError(null);
+    setIsOutdated(false);
+    
+    if (!isPolish) {
+      setTranslatedText("");
+      setComparisonResults(null);
+    }
+    
+    const requestId = ++currentRequestIdRef.current;
+    
+    window.speechSynthesis.cancel();
+    stopGeminiAudio();
+
+    try {
+      const isAvailable = isOpenAIAvailable();
+      const chunks = splitLongText(inputText, 400);
+      const activeSettings = { ...settings, translationStyle: applyFluency ? 'fluent' : settings.translationStyle };
+
+      if (settings.comparisonMode && isAvailable) {
+        const openaiChunksPromises = chunks.map(chunk => 
+          unifiedTranslate(chunk, fromLang, toLang, { ...activeSettings, engine: 'openai' })
+        );
+        const geminiChunksPromises = chunks.map(chunk => 
+          unifiedTranslate(chunk, fromLang, toLang, { ...activeSettings, engine: 'gemini' })
+        );
+
+        const [openaiResults, geminiResults] = await Promise.all([
+          Promise.all(openaiChunksPromises),
+          Promise.all(geminiChunksPromises)
+        ]);
+
+        if (requestId !== currentRequestIdRef.current) return;
+
+        const combinedOpenAI = openaiResults.map(r => r.text).join(' ');
+        const combinedGemini = geminiResults.map(r => r.text).join(' ');
+        const lastSourceOpenAI = openaiResults[0]?.source || 'server';
+        const lastSourceGemini = geminiResults[0]?.source || 'server';
+
+        setComparisonResults({
+          openai: combinedOpenAI,
+          gemini: combinedGemini
+        });
+
+        const finalPrimaryText = applyFluency ? combinedOpenAI : (settings.engine === 'openai' ? combinedOpenAI : combinedGemini);
+        const finalSource = applyFluency ? lastSourceOpenAI : (settings.engine === 'openai' ? lastSourceOpenAI : lastSourceGemini);
+
+        setTranslatedText(finalPrimaryText);
+        setTranslationSource(finalSource);
+
+        const newTranslation: Translation = {
+          id: crypto.randomUUID(),
+          originalText: inputText,
+          translatedText: finalPrimaryText,
+          fromLang,
+          toLang,
+          timestamp: Date.now(),
+          isFavorite: false,
+        };
+        addTranslation(newTranslation);
+
+        if (settings.autoPlayAudio) {
+          speak(finalPrimaryText, toLang);
+        }
+      } else {
+        const chunkPromises = chunks.map(chunk => 
+          unifiedTranslate(
+            chunk,
+            fromLang,
+            toLang,
+            applyFluency && !isAvailable 
+              ? { ...activeSettings, engine: 'gemini' } 
+              : activeSettings
+          )
+        );
+
+        const results = await Promise.all(chunkPromises);
+
+        if (requestId !== currentRequestIdRef.current) return;
+
+        const combinedText = results.map(r => r.text).join(' ');
+        const finalSource = results[0]?.source || 'server';
+
+        setTranslatedText(combinedText);
+        setTranslationSource(finalSource);
+        
+        const newTranslation: Translation = {
+          id: crypto.randomUUID(),
+          originalText: inputText,
+          translatedText: combinedText,
+          fromLang,
+          toLang,
+          timestamp: Date.now(),
+          isFavorite: false,
+        };
+        
+        addTranslation(newTranslation);
+
+        if (settings.autoPlayAudio) {
+          speak(combinedText, toLang);
+        }
+      }
+    } catch (err: any) {
+      if (requestId !== currentRequestIdRef.current) return;
+      console.warn('[DEVELOPER_LOG] Translation process handled an exception:', err);
+    } finally {
+      if (requestId === currentRequestIdRef.current) {
+        setIsLoading(false);
+        setIsPolishing(false);
+      }
+    }
+  };
+
+  const handleSwap = () => {
+    if (fromLang === 'auto') return;
+
+    if (fromLang === toLang) {
+      const suggestion = fromLang === 'pt' ? 'en' : 'pt';
+      setFromLang(suggestion);
+      setError(null);
+      return;
+    }
+
+    const temp = fromLang;
+    setFromLang(toLang);
+    setToLang(temp);
+    setInputText(translatedText);
+    setTranslatedText(inputText);
+    setError(null);
+  };
+
+  const handleCopy = () => {
+    if (!translatedText) return;
+    navigator.clipboard.writeText(translatedText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleClear = () => {
+    setInputText('');
+    setTranslatedText('');
+    setComparisonResults(null);
+    localStorage.removeItem('translator_inputText');
+    localStorage.removeItem('translator_translatedText');
+    localStorage.removeItem('translator_comparisonResults');
+    setError(null);
+    setIsSpeaking(false);
+    setIsListening(false);
+    setAudioState('idle');
+    window.speechSynthesis.cancel();
+    stopGeminiAudio();
+    recognitionRef.current?.stop();
+  };
+
+  const handleMic = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setError("Seu navegador não suporta reconhecimento de voz.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = fromLang === 'auto' ? 'pt-BR' : fromLang;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setError(null);
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      const fullText = finalTranscript || interimTranscript;
+      if (fullText) {
+        setInputText(prev => prev + ' ' + fullText.trim());
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      setIsListening(false);
+      
+      const errorMsg = event.error === 'not-allowed' 
+        ? "Microfone bloqueado. Por favor, permita o acesso nas configurações do navegador."
+        : event.error === 'no-speech'
+        ? "Nenhuma fala detectada. Tente novamente."
+        : "Erro no microfone: " + event.error;
+        
+      setError(errorMsg);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setInputText(prev => (prev ? prev + '\n' + text : text));
+      }
+    } catch (err) {
+      setError("Não foi possível acessar a área de transferência.");
+    }
+  };
 
   // Persistence effect
   useEffect(() => {
@@ -109,8 +647,18 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   }, [inputText, fromLang, toLang, settings]);
 
   useEffect(() => {
-    // Stop all audio on unmount
+    // Stop all audio on unmount or visibility change (background)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        window.speechSynthesis.cancel();
+        stopGeminiAudio();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.speechSynthesis.cancel();
       stopGeminiAudio();
     };
@@ -138,335 +686,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     if (inputText.trim() && translatedText) {
       setIsOutdated(true);
     }
-  }, [settings.translationStyle, settings.fluentMode]);
-
-  const stopGeminiAudio = () => {
-    if (currentAudioSourceRef.current) {
-      currentAudioSourceRef.current.stop();
-      currentAudioSourceRef.current = null;
-    }
-    setIsSpeaking(false);
-  };
-
-  const handleMic = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      return;
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setError("Seu navegador não suporta reconhecimento de voz.");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = fromLang === 'auto' ? 'pt-BR' : fromLang;
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setError(null);
-    };
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      let finalTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interimTranscript += event.results[i][0].transcript;
-        }
-      }
-
-      const fullText = finalTranscript || interimTranscript;
-      if (fullText) {
-        setInputText(prev => prev + ' ' + fullText.trim());
-        // Deduplicate or just append? Appending usually better for continuous
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error', event.error);
-      setIsListening(false);
-      
-      const errorMsg = event.error === 'not-allowed' 
-        ? "Microfone bloqueado. Por favor, permita o acesso nas configurações do navegador."
-        : event.error === 'no-speech'
-        ? "Nenhuma fala detectada. Tente novamente."
-        : "Erro no microfone: " + event.error;
-        
-      setError(errorMsg);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-  };
-
-  const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) {
-        setInputText(prev => (prev ? prev + '\n' + text : text));
-      }
-    } catch (err) {
-      setError("Não foi possível acessar a área de transferência.");
-    }
-  };
-
-  const handleTranslate = async () => {
-    if (!inputText.trim()) return;
-
-    // Rule 1: Se idioma de origem for igual ao destino: NÃO permitir tradução
-    if (fromLang !== 'auto' && fromLang === toLang) {
-      setError("Selecione idiomas diferentes para traduzir");
-      return;
-    }
-    
-    setIsLoading(true);
-    setError(null);
-    setIsOutdated(false);
-    
-    // Limpar resultados anteriores para não reutilizar dados antigos em caso de erro
-    setTranslatedText("");
-    setComparisonResults(null);
-    
-    const requestId = ++currentRequestIdRef.current;
-    
-    window.speechSynthesis.cancel();
-    setIsSpeaking(false);
-
-    try {
-      const isAvailable = isOpenAIAvailable();
-
-      if (settings.comparisonMode && isAvailable) {
-        // AI Comparison Mode: Run both in parallel
-        const [openaiRes, geminiRes] = await Promise.all([
-          unifiedTranslate(inputText, fromLang, toLang, { ...settings, engine: 'openai' }),
-          unifiedTranslate(inputText, fromLang, toLang, { ...settings, engine: 'gemini' })
-        ]);
-
-        if (requestId !== currentRequestIdRef.current) return;
-
-        setComparisonResults({
-          openai: openaiRes.text,
-          gemini: geminiRes.text
-        });
-
-        // Use OpenAI as primary if fluentMode is active, otherwise respect selected engine
-        const primaryResult = (settings.fluentMode) ? openaiRes : (settings.engine === 'openai' ? openaiRes : geminiRes);
-        setTranslatedText(primaryResult.text);
-        setTranslationSource(primaryResult.source);
-
-        const newTranslation: Translation = {
-          id: crypto.randomUUID(),
-          originalText: inputText,
-          translatedText: primaryResult.text,
-          fromLang,
-          toLang,
-          timestamp: Date.now(),
-          isFavorite: false,
-        };
-        addTranslation(newTranslation);
-
-        if (settings.autoPlayAudio) {
-          speak(primaryResult.text, toLang);
-        }
-      } else {
-        // Normal Mode or OpenAI Disabled Fallback
-        const result = await unifiedTranslate(
-          inputText,
-          fromLang,
-          toLang,
-          settings.fluentMode && !isAvailable 
-            ? { ...settings, engine: 'gemini' } 
-            : settings
-        );
-
-        if (requestId !== currentRequestIdRef.current) return;
-
-        setTranslatedText(result.text);
-        setTranslationSource(result.source);
-        
-        const newTranslation: Translation = {
-          id: crypto.randomUUID(),
-          originalText: inputText,
-          translatedText: result.text,
-          fromLang,
-          toLang,
-          timestamp: Date.now(),
-          isFavorite: false,
-        };
-        
-        addTranslation(newTranslation);
-
-        if (settings.autoPlayAudio) {
-          speak(result.text, toLang);
-        }
-      }
-    } catch (err: any) {
-      if (requestId !== currentRequestIdRef.current) return;
-      // Friendly message for the user, technical details stay in console
-      console.warn('[DEVELOPER_LOG] Catastrophic translation error:', err);
-      setError("O serviço de tradução está temporariamente indisponível. Tente novamente em instantes.");
-    } finally {
-      if (requestId === currentRequestIdRef.current) {
-        setIsLoading(false);
-      }
-    }
-  };
-
-  const handleSwap = () => {
-    if (fromLang === 'auto') return;
-
-    // Rule 2: Verificar antes se são iguais
-    if (fromLang === toLang) {
-      // Sugerir automaticamente um idioma diferente (ex: Português)
-      // Se já for português, sugerimos inglês
-      const suggestion = fromLang === 'pt' ? 'en' : 'pt';
-      setFromLang(suggestion);
-      setError(null);
-      return;
-    }
-
-    const temp = fromLang;
-    setFromLang(toLang);
-    setToLang(temp);
-    setInputText(translatedText);
-    setTranslatedText(inputText);
-    setError(null);
-  };
-
-  const handleCopy = () => {
-    if (!translatedText) return;
-    navigator.clipboard.writeText(translatedText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const speak = async (text: string, langCode: string) => {
-    // 1. Cancel everything immediately
-    window.speechSynthesis.cancel();
-    stopGeminiAudio();
-    if (!text) return;
-
-    // 2. Track this request
-    const speechId = ++currentSpeechIdRef.current;
-    setIsSpeaking(true);
-
-    try {
-      // 3. Try high-quality Gemini TTS (async fetch)
-      const base64Data = await unifiedSpeak(text, settings);
-      
-      // 4. Critical check: did someone request a different audio while we were fetching?
-      if (speechId !== currentSpeechIdRef.current) {
-        console.log('Aborting play: newer speech request detected');
-        return;
-      }
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-
-      const binaryString = atob(base64Data);
-      const len = binaryString.length;
-      const bytes = new Int16Array(len / 2);
-      for (let i = 0; i < len; i += 2) {
-        bytes[i / 2] = binaryString.charCodeAt(i) | (binaryString.charCodeAt(i + 1) << 8);
-      }
-
-      const audioBuffer = audioContextRef.current.createBuffer(1, bytes.length, 24000);
-      const channelData = audioBuffer.getChannelData(0);
-      for (let i = 0; i < bytes.length; i++) {
-        channelData[i] = bytes[i] / 32768.0;
-      }
-
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-      
-      // Add gain node for volume control (to avoid "screaming" audio)
-      const gainNode = audioContextRef.current.createGain();
-      gainNode.gain.value = 0.7; // As requested, set to 0.7 for comfort
-      
-      source.connect(gainNode);
-      gainNode.connect(audioContextRef.current.destination);
-      
-      source.onended = () => {
-        if (speechId === currentSpeechIdRef.current) {
-            setIsSpeaking(false);
-            currentAudioSourceRef.current = null;
-        }
-      };
-      
-      currentAudioSourceRef.current = source;
-      source.start();
-
-    } catch (error) {
-      // 5. Final fallback check
-      if (speechId !== currentSpeechIdRef.current) return;
-
-      console.warn('Gemini TTS failed, falling back to system TTS', error);
-      // System Fallback
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Language targeting
-      const targetLang = langCode === 'auto' ? 'pt-BR' : langCode;
-      utterance.lang = targetLang;
-      
-      // User requested properties: suave, natural e agradável
-      utterance.volume = 0.7;
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-
-      // Select better voice
-      // Pre-fetching voices often reduces initial delay
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        // Try to find a high-quality/natural voice for the target language
-        const preferredVoice = voices.find(v => 
-          v.lang.startsWith(targetLang) && 
-          (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium'))
-        ) || voices.find(v => v.lang.startsWith(targetLang));
-        
-        if (preferredVoice) {
-          utterance.voice = preferredVoice;
-        }
-      }
-
-      utterance.onstart = () => {
-        if (speechId === currentSpeechIdRef.current) setIsSpeaking(true);
-      };
-      utterance.onend = () => {
-        if (speechId === currentSpeechIdRef.current) setIsSpeaking(false);
-      };
-      utterance.onerror = () => {
-        if (speechId === currentSpeechIdRef.current) setIsSpeaking(false);
-      };
-      window.speechSynthesis.speak(utterance);
-    }
-  };
-
-  const handleClear = () => {
-    setInputText('');
-    setTranslatedText('');
-    setComparisonResults(null);
-    localStorage.removeItem('translator_inputText');
-    localStorage.removeItem('translator_translatedText');
-    localStorage.removeItem('translator_comparisonResults');
-    setError(null);
-    setIsSpeaking(false);
-    setIsListening(false);
-    window.speechSynthesis.cancel();
-    stopGeminiAudio();
-    recognitionRef.current?.stop();
-  };
+  }, [settings.translationStyle]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -560,77 +780,24 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   return (
-    <div className="mt-2 lg:mt-4 space-y-8 animate-in fade-in duration-700 pb-10 overflow-x-hidden px-1">
-      {/* Toggles Row */}
-      <div className="flex flex-col items-center gap-3 px-2">
-        <AnimatePresence>
-          {!isOpenAIAvailable() && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="w-full max-w-[412px] overflow-hidden"
-            >
-              <div className="mb-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
-                <Sparkles size={12} className="animate-pulse" />
-                <span>Serviço alternativo em uso para garantir funcionamento.</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        
-        <div className="flex flex-wrap items-center justify-center gap-3 w-full">
-          <button
-            onClick={() => setSettings(prev => ({ ...prev, comparisonMode: !prev.comparisonMode }))}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest flex-1 max-w-[200px] justify-between",
-              settings.comparisonMode 
-                ? "bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 shadow-sm shadow-blue-500/5" 
-                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500 shadow-sm"
-            )}
+    <div className="relative animate-in fade-in duration-700 pb-10 overflow-x-hidden px-1 pt-2 lg:pt-4">
+      <AnimatePresence>
+        {!isOpenAIAvailable() && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="w-full max-w-[412px] mx-auto overflow-hidden px-2 mb-4"
           >
-            <div className="flex items-center gap-2">
-              <ClipboardList size={14} className={cn(settings.comparisonMode && "animate-pulse")} />
-              <span>Comparação IA</span>
+            <div className="flex items-center justify-center gap-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest text-center">
+              <Sparkles size={12} className="animate-pulse" />
+              <span>Serviço alternativo em uso para garantir funcionamento.</span>
             </div>
-            <div className={cn(
-              "w-7 h-3.5 rounded-full relative transition-all",
-              settings.comparisonMode ? "bg-blue-500" : "bg-slate-300 dark:bg-zinc-700"
-            )}>
-              <div className={cn(
-                "absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all",
-                settings.comparisonMode ? "left-4" : "left-0.5"
-              )} />
-            </div>
-          </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          <button
-            onClick={() => setSettings(prev => ({ ...prev, fluentMode: !prev.fluentMode }))}
-            disabled={settings.engine !== 'openai' && !settings.comparisonMode}
-            className={cn(
-              "flex items-center gap-2 px-4 py-2.5 rounded-2xl transition-all border font-bold text-[10px] uppercase tracking-widest flex-1 max-w-[200px] justify-between",
-              settings.fluentMode 
-                ? "bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400 shadow-sm shadow-purple-500/5" 
-                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-white/5 text-slate-400 dark:text-zinc-500 shadow-sm",
-              (settings.engine !== 'openai' && !settings.comparisonMode) && "opacity-30 cursor-not-allowed grayscale"
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <Sparkles size={14} className={cn(settings.fluentMode && "animate-pulse")} />
-              <span>Fluente Nativo</span>
-            </div>
-            <div className={cn(
-              "w-7 h-3.5 rounded-full relative transition-all",
-              settings.fluentMode ? "bg-purple-500" : "bg-slate-300 dark:bg-zinc-700"
-            )}>
-              <div className={cn(
-                "absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-all",
-                settings.fluentMode ? "left-4" : "left-0.5"
-              )} />
-            </div>
-          </button>
-        </div>
-      </div>
+      <div className="space-y-8 px-1">
 
       {/* Hidden Inputs */}
       <input 
@@ -741,7 +908,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
       {/* 2. MEIO: Caixa de texto */}
       <div className="space-y-4">
-        {/* Sugestão de detecção */}
         <AnimatePresence>
           {detectedSuggestion && (
             <motion.div
@@ -843,16 +1009,15 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
             {inputText && (
               <div className="flex items-center gap-3">
-                <button 
-                  onClick={() => speak(inputText, fromLang)}
-                  className={cn(
-                    "p-3.5 rounded-2xl transition-all shadow-sm active:scale-90",
-                    isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-100 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4] border border-slate-200 dark:border-white/10"
-                  )}
-                  title="Ouvir texto original"
-                >
-                  <Volume2 size={20} />
-                </button>
+                <AudioControls 
+                  state={audioState}
+                  onPlay={() => handleAudioControl('play', inputText, fromLang)}
+                  onPause={() => handleAudioControl('pause')}
+                  onResume={() => handleAudioControl('resume')}
+                  onStop={() => handleAudioControl('stop')}
+                  speed={settings.audioSpeed}
+                  onSpeedChange={(s) => handleAudioControl('speed', undefined, undefined, s)}
+                />
                 <button 
                   onClick={handleClear}
                   className="p-3.5 bg-red-500/10 text-red-500 rounded-2xl hover:scale-105 active:scale-95 transition-all border border-red-500/10"
@@ -864,30 +1029,10 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
             )}
           </div>
         </div>
-
-        {/* 3. ABAIXO DA CAIXA: Câmera e Galeria */}
-        <div className="flex items-center justify-center gap-4">
-          <button 
-            onClick={() => cameraInputRef.current?.click()}
-            className="flex-1 h-16 rounded-3xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-white/5 text-slate-500 hover:text-[#7B3FE4] hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center justify-center gap-3 transition-all active:scale-[0.98] font-bold text-sm shadow-sm"
-          >
-            <Camera size={20} />
-            <span>Câmera</span>
-          </button>
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="flex-1 h-16 rounded-3xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-200 dark:border-white/5 text-slate-500 hover:text-[#7B3FE4] hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center justify-center gap-3 transition-all active:scale-[0.98] font-bold text-sm shadow-sm"
-          >
-            <ImageIcon size={20} />
-            <span>Galeria</span>
-          </button>
-        </div>
       </div>
-
-      {/* 4. PARTE INFERIOR: Traduzir */}
       <div className="flex items-center gap-3 pt-4">
         <button
-          onClick={handleTranslate}
+          onClick={() => handleTranslate()}
           disabled={isLoading || !inputText.trim()}
           className={cn(
             "primary-btn flex-1 h-16 flex items-center justify-center gap-3 text-lg shadow-2xl relative overflow-hidden active:scale-[0.97] transition-all rounded-3xl",
@@ -921,8 +1066,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
               <ComparisonCard 
                 engine="openai" 
                 text={comparisonResults.openai} 
-                onSpeak={() => speak(comparisonResults.openai, toLang)}
-                isSpeaking={isSpeaking}
+                audioState={audioState}
+                onAudioControl={handleAudioControl}
+                speed={settings.audioSpeed}
                 onCopy={() => {
                   navigator.clipboard.writeText(comparisonResults.openai);
                   setCopied(true);
@@ -934,8 +1080,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
               <ComparisonCard 
                 engine="gemini" 
                 text={comparisonResults.gemini} 
-                onSpeak={() => speak(comparisonResults.gemini, toLang)}
-                isSpeaking={isSpeaking}
+                audioState={audioState}
+                onAudioControl={handleAudioControl}
+                speed={settings.audioSpeed}
                 onCopy={() => {
                   navigator.clipboard.writeText(comparisonResults.gemini);
                   setCopied(true);
@@ -961,15 +1108,27 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                   </div>
                   <div className="flex gap-2">
                     <button 
-                      onClick={() => speak(translatedText, toLang)}
+                      onClick={() => handleTranslate(true)}
+                      disabled={isPolishing}
                       className={cn(
-                        "p-3 rounded-2xl transition-all shadow-sm active:scale-90",
-                        isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-50 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4]"
+                        "px-4 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 hover:from-purple-500/20 hover:to-blue-500/20 rounded-2xl text-[10px] font-black uppercase tracking-[2px] transition-all flex items-center gap-2 border border-purple-500/10",
+                        isPolishing && "animate-pulse brightness-90 shadow-none pointer-events-none"
                       )}
-                      title="Ouvir"
+                      title="Polir fluência para soar mais natural"
                     >
-                      <Volume2 size={22} />
+                      {isPolishing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} className="text-purple-500" />}
+                      <span>{isPolishing ? 'Polindo...' : 'Polir Fluência'}</span>
                     </button>
+                    <AudioControls 
+                      state={audioState}
+                      onPlay={() => handleAudioControl('play', translatedText, toLang)}
+                      onPause={() => handleAudioControl('pause')}
+                      onResume={() => handleAudioControl('resume')}
+                      onStop={() => handleAudioControl('stop')}
+                      speed={settings.audioSpeed}
+                      onSpeedChange={(s) => handleAudioControl('speed', undefined, undefined, s)}
+                      variant="minimal"
+                    />
                     <button 
                       onClick={handleCopy}
                       className="p-3 bg-slate-50 dark:bg-zinc-800 rounded-2xl text-slate-500 hover:text-[#7B3FE4] shadow-sm transition-all active:scale-90"
@@ -1001,10 +1160,11 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         </AnimatePresence>
       </div>
     </div>
-  );
+  </div>
+);
 }
 
-function ComparisonCard({ engine, text, onSpeak, isSpeaking, onCopy, isCopied, toLang }: any) {
+function ComparisonCard({ engine, text, onSpeak, audioState, onAudioControl, isCopied, onCopy, toLang, speed }: any) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -1025,15 +1185,16 @@ function ComparisonCard({ engine, text, onSpeak, isSpeaking, onCopy, isCopied, t
             </span>
           </div>
           <div className="flex gap-2">
-            <button 
-              onClick={onSpeak}
-              className={cn(
-                "p-2.5 rounded-xl transition-all active:scale-90",
-                isSpeaking ? "bg-[#7B3FE4] text-white animate-pulse" : "bg-slate-50 dark:bg-zinc-800 text-slate-500 hover:text-[#7B3FE4]"
-              )}
-            >
-              <Volume2 size={18} />
-            </button>
+            <AudioControls 
+              state={audioState}
+              onPlay={() => onAudioControl('play', text, toLang)}
+              onPause={() => onAudioControl('pause')}
+              onResume={() => onAudioControl('resume')}
+              onStop={() => onAudioControl('stop')}
+              speed={speed}
+              onSpeedChange={(s) => onAudioControl('speed', undefined, undefined, s)}
+              variant="minimal"
+            />
             <button 
               onClick={onCopy}
               className="p-2.5 bg-slate-50 dark:bg-zinc-800 rounded-xl text-slate-500 hover:text-[#7B3FE4] transition-all active:scale-90"

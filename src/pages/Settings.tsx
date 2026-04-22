@@ -289,7 +289,7 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
           </div>
 
           {/* Auto Audio */}
-          <div className="p-6 flex items-center justify-between hover:bg-white/50 dark:hover:bg-white/[0.02] transition-colors">
+          <div className="p-6 flex items-center justify-between hover:bg-white/50 dark:hover:bg-white/[0.02] transition-colors border-b border-slate-100 dark:border-white/5">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-2xl bg-blue-100 dark:bg-blue-900/20 text-blue-500 flex items-center justify-center">
                 <Volume2 size={24} />
@@ -311,6 +311,35 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
                 settings.autoPlayAudio ? "left-9" : "left-1"
               )} />
             </button>
+          </div>
+
+          {/* Audio Speed */}
+          <div className="p-6 flex flex-col gap-4 hover:bg-white/50 dark:hover:bg-white/[0.02] transition-colors">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-purple-100 dark:bg-purple-900/20 text-purple-500 flex items-center justify-center">
+                <Zap size={24} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-black">Velocidade de Leitura</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ajuste o ritmo da voz</span>
+              </div>
+            </div>
+            <div className="flex gap-2 p-1 bg-slate-100 dark:bg-black/40 rounded-2xl border border-slate-200 dark:border-white/10">
+              {[0.75, 1, 1.25, 1.5].map((s) => (
+                <button
+                  key={s}
+                  onClick={() => updateSetting('audioSpeed', s)}
+                  className={cn(
+                    "flex-1 py-3 rounded-xl text-xs font-black transition-all",
+                    settings.audioSpeed === s 
+                      ? "bg-white dark:bg-zinc-800 text-[#7B3FE4] shadow-sm" 
+                      : "text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                  )}
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>

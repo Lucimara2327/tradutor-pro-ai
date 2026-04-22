@@ -37,20 +37,20 @@ export default function App() {
       autoPlayAudio: false,
       model: 'gemini-1.5-flash',
       engine: 'gemini',
-      fluentMode: true,
       comparisonMode: false,
       translationStyle: 'normal',
+      audioSpeed: 1.0,
     };
     
     if (saved) {
       const parsed = JSON.parse(saved);
       // Migration: insure engine exists and model is compatible
+      if (parsed.audioSpeed === undefined) {
+        parsed.audioSpeed = 1.0;
+      }
       if (!parsed.engine) {
         parsed.engine = 'gemini';
         parsed.model = 'gemini-1.5-flash';
-      }
-      if (parsed.fluentMode === undefined) {
-        parsed.fluentMode = true;
       }
       if (parsed.comparisonMode === undefined) {
         parsed.comparisonMode = false;
@@ -100,13 +100,13 @@ export default function App() {
   };
 
   const clearHistory = () => {
-    setHistory([]);
+    setHistory(prev => prev.filter(t => t.isFavorite));
   };
 
   return (
     <HashRouter>
       <Routes>
-        <Route element={<Layout />}>
+        <Route element={<Layout settings={settings} setSettings={setSettings} />}>
           <Route index element={
             <Translator 
               settings={settings} 

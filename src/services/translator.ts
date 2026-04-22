@@ -51,8 +51,8 @@ export function checkCache(
   toLang: string,
   settings: AppSettings
 ): TranslationResult | null {
-  const { engine, model, fluentMode } = settings;
-  const cacheKey = `${engine}-${model}-${fluentMode}-${fromLang}-${toLang}-${text}`;
+  const { engine, model } = settings;
+  const cacheKey = `${engine}-${model}-${fromLang}-${toLang}-${text}`;
   return translationCache.get(cacheKey) || null;
 }
 
@@ -251,46 +251,17 @@ export async function unifiedTranslate(
   toLang: string,
   settings: AppSettings
 ): Promise<TranslationResult> {
-  const { engine, model, geminiApiKey, openaiApiKey, fluentMode } = settings;
-  const cacheKey = `${engine}-${model}-${fluentMode}-${fromLang}-${toLang}-${text}`;
+  const { engine, model, geminiApiKey, openaiApiKey } = settings;
+  const cacheKey = `${engine}-${model}-${fromLang}-${toLang}-${text}`;
 
   // Check Cache first
   if (translationCache.has(cacheKey)) {
     return translationCache.get(cacheKey)!;
   }
 
-  // Handle Long Text (Chunking)
-  const MAX_CHAR_LIMIT = 4500;
-  if (text.length > MAX_CHAR_LIMIT) {
-    const chunks = splitIntoChunks(text, MAX_CHAR_LIMIT);
-    const translatedChunks: string[] = [];
-    let isServerSource = true;
-
-    for (let i = 0; i < chunks.length; i++) {
-      // Small delay between chunks to avoid rate limits
-      if (i > 0) await new Promise(r => setTimeout(r, 200));
-      
-      const chunkResult = await unifiedTranslate(chunks[i], fromLang, toLang, {
-        ...settings,
-        // We bypass cache for sub-chunks to avoid key collision if same short text appears twice
-        // actually recursive call will handle its own cache
-      });
-      translatedChunks.push(chunkResult.text);
-      if (chunkResult.source === 'client') isServerSource = false;
-    }
-
-    const finalResult: TranslationResult = {
-      text: translatedChunks.join('\n\n'),
-      source: isServerSource ? 'server' : 'client'
-    };
-    translationCache.set(cacheKey, finalResult);
-    return finalResult;
-  }
-
   // Helper to attempt a translation with specific parameters
-  async function performTranslation(currentEngine: 'gemini' | 'openai', forceNormal: boolean = false): Promise<TranslationResult> {
-    const activeStyle = forceNormal ? 'normal' : settings.translationStyle;
-    const activeFluent = forceNormal ? false : fluentMode;
+  async function performTranslation(currentEngine: 'gemini' | 'openai'): Promise<TranslationResult> {
+    const activeStyle = settings.translationStyle;
     
     if (currentEngine === 'openai' && !isOpenAIAvailable()) {
       throw new Error('OPENAI_TEMPORARILY_DISABLED_QUOTA');
@@ -302,7 +273,7 @@ export async function unifiedTranslate(
         // Gemini: Always Client-side (Skill Constraint)
         if (currentEngine === 'gemini') {
           const geminiModel = "models/gemini-1.5-flash"; 
-          const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeFluent, activeStyle), 15000);
+          const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeStyle), 15000);
           if (isValidTranslation(text, resultText)) {
             return { text: resultText, source: 'client' };
           }
@@ -321,7 +292,6 @@ export async function unifiedTranslate(
               toLang, 
               engine: currentEngine, 
               model, 
-              fluentMode: activeFluent,
               translationStyle: activeStyle,
               openaiApiKey
             })
@@ -334,32 +304,28 @@ export async function unifiedTranslate(
             }
           }
           
-          // Se chegou aqui, a resposta do servidor foi inválida, vamos tentar cliente ou repetir
           if (response.status === 429) throw new Error('QUOTA_LIMIT');
           
         } catch (serverErr: any) {
-          if (serverErr.message === 'QUOTA_LIMIT') throw serverErr; // Propaga erro de cota
+          if (serverErr.message === 'QUOTA_LIMIT') throw serverErr;
           handleApiError(serverErr, `ServerSide_${currentEngine}`);
         }
 
-        // OpenAI Client-side Fallback dentro do retry
+        // OpenAI Client-side Fallback
         const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
-        const resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel, activeFluent), 15000);
+        const resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel), 15000);
 
         if (isValidTranslation(text, resultText)) {
           return { text: resultText, source: 'client' };
         }
-        console.warn(`[RETRY] OpenAI attempt ${attemptCount + 1} produced invalid output.`);
       } catch (err: any) {
-        // Se for erro de cota, sai do loop imediatamente para respeitar o circuit breaker
         const isQuota = err.message?.includes('429') || err.message?.includes('QUOTA') || err.message?.includes('RATE_LIMIT');
         if (isQuota) {
           handleApiError(err, `performTranslation_${currentEngine}`);
           throw err;
         }
         
-        if (attemptCount === 1) throw err; // Desiste após 2 tentativas
-        console.warn(`[RETRY_ERROR] Attempt ${attemptCount + 1} failed: ${err.message}`);
+        if (attemptCount === 1) throw err;
       }
     }
     
@@ -369,41 +335,24 @@ export async function unifiedTranslate(
   try {
     let result: TranslationResult;
 
-    // 3/4. FLUXO FINAL DE TRADUÇÃO REEESTRUTURADO
-    // Priorizamos OpenAI se o Modo Fluente estiver ativo, pois ele entrega melhor naturalidade
-    if (fluentMode) {
-      // Modo Fluente ATIVO: 1. OpenAI -> 2. Gemini -> 3. Local
+    // FLUXO DE TRADUÇÃO SIMPLIFICADO: Respeita o motor selecionado
+    const isGeminiSelected = settings.engine === 'gemini';
+    if (isGeminiSelected) {
+      try {
+        result = await performTranslation('gemini');
+      } catch (err) {
+        const localText = await translateLocal(text, fromLang, toLang);
+        result = { text: localText, source: 'client' };
+      }
+    } else {
       try {
         result = await performTranslation('openai');
       } catch (openaiErr) {
         try {
-          // Gemini fallback
-          result = await performTranslation('gemini', false);
+          result = await performTranslation('gemini');
         } catch (geminiErr) {
           const localText = await translateLocal(text, fromLang, toLang);
           result = { text: localText, source: 'client' };
-        }
-      }
-    } else {
-      // Modo Fluente DESATIVADO: Respeita o motor selecionado
-      const isGeminiSelected = settings.engine === 'gemini';
-      if (isGeminiSelected) {
-        try {
-          result = await performTranslation('gemini', true);
-        } catch (err) {
-          const localText = await translateLocal(text, fromLang, toLang);
-          result = { text: localText, source: 'client' };
-        }
-      } else {
-        try {
-          result = await performTranslation('openai');
-        } catch (openaiErr) {
-          try {
-            result = await performTranslation('gemini', true);
-          } catch (geminiErr) {
-            const localText = await translateLocal(text, fromLang, toLang);
-            result = { text: localText, source: 'client' };
-          }
         }
       }
     }

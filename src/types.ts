@@ -16,9 +16,9 @@ export interface AppSettings {
   autoPlayAudio: boolean;
   model: string;
   engine: 'gemini' | 'openai';
-  fluentMode: boolean;
   comparisonMode: boolean;
   translationStyle: 'normal' | 'fluent' | 'formal' | 'informal';
+  audioSpeed: number;
 }
 
 export type LanguageCode = string;
