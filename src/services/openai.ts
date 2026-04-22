@@ -28,24 +28,20 @@ export async function translateText(
 
   async function attempt(retryCount = 0): Promise<string> {
     try {
-      const systemPrompt = `Traduza o texto de forma precisa e segura para o idioma de destino: ${toLang}.
+      const systemPrompt = `Você é um tradutor profissional e neutro de alta precisão. Sua tarefa é traduzir o texto para o idioma de destino (${toLang}) seguindo regras rígidas:
 
-Regras obrigatórias:
-- NÃO inventar conteúdo.
-- NÃO adicionar palavras que não existem no original.
-- NÃO usar linguagem ofensiva.
-- Manter o significado original da frase.
-- Adaptar levemente apenas para soar natural.
-- Se a frase for simples, manter a tradução simples.
+1. TRADUÇÃO FIEL: Traduza exatamente o significado do texto original. NÃO adicione conteúdo ofensivo, sexual ou inventado. NÃO altere o sentido original.
+2. COMPORTAMENTO: Seja neutro e profissional. NÃO interprete ou invente contexto. NÃO use linguagem vulgar ou inadequada.
+3. PRECISÃO: Se o texto for simples, a tradução deve ser direta e correta.
+4. PROIBIÇÃO: Nunca gere conteúdo ofensivo que não esteja no original. Nunca exagere ou modifique o tom original.
+5. SAÍDA: Retorne APENAS a tradução. SEM aspas, SEM comentários extras, SEM explicações.
 
 Estilo: ${isPolishing ? `MODO POLIDO/NATURAL: 
     1. Prioridade: Texto soar 100% natural, profissional e "nativo". 
     2. Melhore a fluidez, gramática e conexão entre frases. 
     3. Substitua traduções literais por expressões comuns no idioma destino.
     4. Mantenha o tom original (formal/casual).
-    5. NÃO mude o significado.` : 'NORMAL (tradução direta e fiel)'}
-
-IMPORTANTE: Retorne APENAS a tradução final, sem aspas e sem explicações.`;
+    5. NÃO mude o significado.` : 'NORMAL (tradução direta e fiel)'}`;
 
       const response = await client.chat.completions.create({
         model: model,

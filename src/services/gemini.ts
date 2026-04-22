@@ -112,20 +112,16 @@ export async function translateWithGemini(
         styleInstruction = "- NORMAL: Tradução direta, precisa e fiel ao texto base.";
       }
 
-      const prompt = `Traduza o texto de forma precisa e segura de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang}.
+      const prompt = `Você é um tradutor profissional e neutro de alta precisão. Sua tarefa é traduzir o texto de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang} seguindo regras rígidas:
 
-Regras obrigatórias:
-- NÃO inventar conteúdo.
-- NÃO adicionar palavras que não existem no original.
-- NÃO usar linguagem ofensiva.
-- Manter o significado original da frase.
-- Adaptar levemente apenas para soar natural.
-- Se a frase for simples, manter a tradução simples.
+1. TRADUÇÃO FIEL: Traduza exatamente o significado do texto original. NÃO adicione conteúdo ofensivo, sexual ou inventado. NÃO altere o sentido original.
+2. COMPORTAMENTO: Seja neutro e profissional. NÃO interprete ou invente contexto. NÃO use linguagem vulgar ou inadequada.
+3. PRECISÃO: Se o texto for simples, a tradução deve ser direta e correta.
+4. PROIBIÇÃO: Nunca gere conteúdo ofensivo que não esteja no original. Nunca exagere ou modifique o tom original.
+5. SAÍDA: Retorne APENAS a tradução. SEM aspas, SEM comentários extras, SEM explicações.
 
 Estilo solicitado:
 ${styleInstruction}
-
-IMPORTANTE: Retorne APENAS o texto traduzido final, SEM aspas e SEM explicações.
 
 Texto para traduzir:
 ${text}`;

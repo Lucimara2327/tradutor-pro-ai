@@ -171,18 +171,24 @@ const isValidTranslation = (original: string, translated: string | null | undefi
   const hallucinations = [
     'here is the translation', 'tradução:', 'the translation is', 'translated to', 
     'claro, aqui está', 'tradução fiel:', 'desculpe', 'não posso traduzir', 
-    'as an ai', 'como um modelo de linguagem'
+    'as an ai', 'como um modelo de linguagem', 'tradução profissional', 
+    'significado original:', 'texto original:', 'traduzido de', 'a tradução é'
   ];
   if (hallucinations.some(h => cleanTrans.includes(h))) return false;
 
-  // 3. Detecção básica de conteúdo ofensivo (Safety Gate)
+  // 4. Se a IA colocar o texto entre aspas quando não deveria
+  if (translated.startsWith('"') && translated.endsWith('"') && !original.startsWith('"')) {
+    return false; // Forçar a IA a enviar o texto limpo sem aspas extras na próxima tentativa
+  }
+
+  // 5. Detecção básica de conteúdo ofensivo (Safety Gate)
   const offensiveTerms = ['fuck', 'shit', 'bitch', 'asshole']; // Lista básica para exemplo
   if (offensiveTerms.some(term => cleanTrans.includes(term))) {
     console.warn('[SAFETY_BLOCK] Conteúdo ofensivo detectado na tradução.');
     return false;
   }
 
-  // 4. Validação de Comprimento Heurística
+  // 6. Validação de Comprimento Heurística
   if (original.length > 30) {
      const ratio = translated.length / original.length;
      if (ratio < 0.15 || ratio > 6) return false;
