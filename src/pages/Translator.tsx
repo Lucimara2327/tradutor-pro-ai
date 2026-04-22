@@ -560,7 +560,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   return (
-    <div className="mt-2 lg:mt-4 space-y-8 animate-in fade-in duration-700 pb-20 overflow-x-hidden px-1">
+    <div className="mt-2 lg:mt-4 space-y-8 animate-in fade-in duration-700 pb-10 overflow-x-hidden px-1">
       {/* Toggles Row */}
       <div className="flex flex-col items-center gap-3 px-2">
         <AnimatePresence>
