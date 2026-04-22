@@ -36,8 +36,6 @@ const AudioControls = ({
   onPause, 
   onResume, 
   onStop,
-  speed,
-  onSpeedChange,
   variant = 'default' 
 }: { 
   state: 'idle' | 'playing' | 'paused' | 'loading';
@@ -45,12 +43,8 @@ const AudioControls = ({
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
-  speed: number;
-  onSpeedChange: (s: number) => void;
   variant?: 'default' | 'minimal';
 }) => {
-  const speeds = [0.75, 1, 1.25, 1.5];
-
   if (state === 'loading') {
     return (
       <button className="p-3.5 bg-slate-100 dark:bg-zinc-800 text-[#7B3FE4] rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm animate-pulse">
@@ -61,26 +55,6 @@ const AudioControls = ({
 
   return (
     <div className="flex items-center gap-2">
-      {/* Speed Selector */}
-      {variant === 'default' && (
-        <div className="flex items-center bg-slate-100 dark:bg-zinc-800 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 h-[52px]">
-          {speeds.map((s) => (
-            <button
-              key={s}
-              onClick={() => onSpeedChange(s)}
-              className={cn(
-                "px-2.5 h-full text-[10px] font-black transition-all",
-                speed === s 
-                  ? "bg-[#7B3FE4] text-white" 
-                  : "text-slate-500 hover:bg-slate-200 dark:hover:bg-zinc-700"
-              )}
-            >
-              {s}x
-            </button>
-          ))}
-        </div>
-      )}
-
       {state === 'playing' ? (
         <div className="flex items-center gap-2">
           <button 
@@ -130,18 +104,6 @@ const AudioControls = ({
         </button>
       )}
 
-      {/* Minimal speed indicator if playing/paused in minimal mode */}
-      {variant === 'minimal' && (state === 'playing' || state === 'paused') && (
-        <button 
-          onClick={() => {
-            const nextIdx = (speeds.indexOf(speed) + 1) % speeds.length;
-            onSpeedChange(speeds[nextIdx]);
-          }}
-          className="px-2 py-1 bg-slate-100 dark:bg-zinc-800 text-[10px] font-black rounded-lg text-[#7B3FE4] border border-slate-200 dark:border-white/10"
-        >
-          {speed}x
-        </button>
-      )}
     </div>
   );
 };
@@ -1015,8 +977,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                   onPause={() => handleAudioControl('pause')}
                   onResume={() => handleAudioControl('resume')}
                   onStop={() => handleAudioControl('stop')}
-                  speed={settings.audioSpeed}
-                  onSpeedChange={(s) => handleAudioControl('speed', undefined, undefined, s)}
                 />
                 <button 
                   onClick={handleClear}
@@ -1068,7 +1028,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                 text={comparisonResults.openai} 
                 audioState={audioState}
                 onAudioControl={handleAudioControl}
-                speed={settings.audioSpeed}
                 onCopy={() => {
                   navigator.clipboard.writeText(comparisonResults.openai);
                   setCopied(true);
@@ -1082,7 +1041,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                 text={comparisonResults.gemini} 
                 audioState={audioState}
                 onAudioControl={handleAudioControl}
-                speed={settings.audioSpeed}
                 onCopy={() => {
                   navigator.clipboard.writeText(comparisonResults.gemini);
                   setCopied(true);
@@ -1125,8 +1083,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                       onPause={() => handleAudioControl('pause')}
                       onResume={() => handleAudioControl('resume')}
                       onStop={() => handleAudioControl('stop')}
-                      speed={settings.audioSpeed}
-                      onSpeedChange={(s) => handleAudioControl('speed', undefined, undefined, s)}
                       variant="minimal"
                     />
                     <button 
@@ -1164,7 +1120,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 );
 }
 
-function ComparisonCard({ engine, text, onSpeak, audioState, onAudioControl, isCopied, onCopy, toLang, speed }: any) {
+function ComparisonCard({ engine, text, onSpeak, audioState, onAudioControl, isCopied, onCopy, toLang }: any) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -1191,8 +1147,6 @@ function ComparisonCard({ engine, text, onSpeak, audioState, onAudioControl, isC
               onPause={() => onAudioControl('pause')}
               onResume={() => onAudioControl('resume')}
               onStop={() => onAudioControl('stop')}
-              speed={speed}
-              onSpeedChange={(s) => onAudioControl('speed', undefined, undefined, s)}
               variant="minimal"
             />
             <button 

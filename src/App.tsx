@@ -116,7 +116,7 @@ export default function App() {
           } />
           <Route path="history" element={
             <HistoryPage 
-              history={history} 
+              history={history.filter(t => !t.isFavorite)} 
               toggleFavorite={toggleFavorite} 
               deleteTranslation={deleteTranslation} 
               clearHistory={clearHistory}
