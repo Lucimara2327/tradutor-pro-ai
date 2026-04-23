@@ -1,5 +1,6 @@
 
 import { GoogleGenAI, Modality } from "@google/genai";
+import { getTranslationPrompt, getModeClassificationPrompt, getQualityCheckPrompt } from './prompts';
 
 let geminiClient: { client: any; key: string } | null = null;
 
@@ -87,7 +88,8 @@ export async function translateWithGemini(
   toLang: string,
   apiKey?: string,
   _ignoredModel: string = 'gemini-1.5-flash',
-  translationStyle: 'normal' | 'fluent' | 'formal' | 'informal' = 'normal'
+  translationStyle: 'normal' | 'fluent' | 'formal' | 'informal' | 'professional' | 'correct' = 'normal',
+  isAdjustment: boolean = false
 ): Promise<string> {
   const style = translationStyle;
 
@@ -96,38 +98,16 @@ export async function translateWithGemini(
       const ai = getGeminiClient(apiKey);
       const model = "gemini-3-flash-preview";
 
-      let styleInstruction = "";
-      if (style === 'fluent') {
-        styleInstruction = `
-- MODO FLUENTE (NATIVO): Sua prioridade é fazer o texto soar 100% natural, profissional e "nativo". 
-- Melhore a fluidez, a gramática e a conexão entre as frases. 
-- Substitua traduções literais por expressões equivalentes mais comuns no idioma de destino.
-- Mantenha rigorosamente o tom original (se for formal, mantenha formal; se for casual/gíria, mantenha casual).
-- NÃO altere o significado original, apenas a forma como é expresso.`;
-      } else if (style === 'formal') {
-        styleInstruction = "- FORMAL: Use uma linguagem educada, correta e profissional (você/senhor).";
-      } else if (style === 'informal') {
-        styleInstruction = "- INFORMAL: Use uma linguagem leve, comum e gírias apropriadas ao contexto.";
-      } else {
-        styleInstruction = "- NORMAL: Tradução direta, precisa e fiel ao texto base.";
-      }
-
-      const prompt = `Você é um tradutor profissional e neutro de alta precisão. Sua tarefa é traduzir o texto de ${fromLang === 'auto' ? 'auto' : fromLang} para ${toLang} seguindo regras rígidas:
-
-1. TRADUÇÃO FIEL: Traduza exatamente o significado do texto original. NÃO adicione conteúdo ofensivo, sexual ou inventado. NÃO altere o sentido original.
-2. COMPORTAMENTO: Seja neutro e profissional. NÃO interprete ou invente contexto. NÃO use linguagem vulgar ou inadequada.
-3. PRECISÃO: Se o texto for simples, a tradução deve ser direta e correta.
-4. PROIBIÇÃO: Nunca gere conteúdo ofensivo que não esteja no original. Nunca exagere ou modifique o tom original.
-5. SAÍDA: Retorne APENAS a tradução. SEM aspas, SEM comentários extras, SEM explicações.
-
-Estilo solicitado:
-${styleInstruction}
-
-Texto para traduzir:
-${text}`;
+      const prompt = getTranslationPrompt({
+        fromLang,
+        toLang,
+        style: translationStyle,
+        text,
+        isAdjustment
+      });
 
       console.log(`[DEBUG] Gemini Request - Model: ${model} | Target: ${toLang}`);
-      console.log(`[DEBUG] Full Prompt:`, prompt);
+      console.log(`[DEBUG] Prompt Sent:`, prompt);
 
       const response = await ai.models.generateContent({
         model: model,
@@ -159,10 +139,11 @@ ${text}`;
 
       console.error('Gemini attempt failed:', errorMsg);
       
-      // Throw normalized error for the orchestrator
+      // Normalize errors for the orchestrator
       if (errorMsg.includes('API key not valid')) throw new Error('INVALID_KEY');
       if (errorMsg.includes('quota exceeded')) throw new Error('RATE_LIMIT');
       if (errorMsg.includes('not found')) throw new Error('MODEL_NOT_FOUND');
+      if (errorMsg.includes('xhr error') || errorMsg.includes('Rpc failed')) throw new Error('NETWORK_OR_PROXY_ERROR');
       
       throw new Error(errorMsg);
     }
@@ -173,5 +154,67 @@ ${text}`;
   } catch (error: any) {
     console.error('Gemini catastrophic failure:', error);
     throw error;
+  }
+}
+
+/**
+ * Classifica o pedido de ajuste do usuário usando Gemini
+ */
+export async function classifyAdjustmentMode(
+  userInput: string,
+  apiKey?: string
+): Promise<'natural' | 'informal' | 'formal' | 'professional' | 'correct'> {
+  const ai = getGeminiClient(apiKey);
+  const prompt = getModeClassificationPrompt(userInput);
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0,
+      }
+    });
+
+    const result = response.text?.trim().toLowerCase() || 'natural';
+    
+    // Validação estrita do retorno
+    if (result.includes('informal')) return 'informal';
+    if (result.includes('formal')) return 'formal';
+    if (result.includes('profissional') || result.includes('professional')) return 'professional'; // Mapeia para a chave professional do AppSettings
+    if (result.includes('corrigir') || result.includes('correct')) return 'correct';
+    
+    return 'natural';
+  } catch (error) {
+    console.warn('[CLASSIFICATION_ERROR] Falha ao classificar comando:', error);
+    return 'natural'; // Fallback seguro
+  }
+}
+
+/**
+ * Valida a qualidade de uma tradução usando Gemini
+ */
+export async function validateTranslationQuality(
+  original: string,
+  traducao: string,
+  apiKey?: string
+): Promise<boolean> {
+  const ai = getGeminiClient(apiKey);
+  const prompt = getQualityCheckPrompt(original, traducao);
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0,
+      }
+    });
+
+    const result = response.text?.trim().toLowerCase() || 'válido';
+    return result.includes('válido') || !result.includes('inválido');
+  } catch (error) {
+    console.warn('[QUALITY_CHECK_ERROR] Falha ao verificar qualidade:', error);
+    return true; // Fallback otimista para não bloquear o usuário
   }
 }

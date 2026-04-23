@@ -16,13 +16,23 @@ import {
   ClipboardList,
   Pause,
   Play,
-  Square
+  Square,
+  MessageSquare,
+  Scale,
+  Briefcase,
+  CheckCircle,
+  Wand2,
+  Zap,
+  Send,
+  ShieldCheck,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LANGUAGES } from '@/src/constants';
 import { AppSettings, Translation } from '@/src/types';
-import { unifiedTranslate, unifiedSpeak, detectLanguage, isOpenAIAvailable } from '@/src/services/translator';
+import { unifiedTranslate, unifiedSpeak, detectLanguage, isOpenAIAvailable, classifyAdjustmentMode, validateTranslationQuality } from '@/src/services/translator';
 import { cn, splitLongText } from '@/src/utils';
+import { FloatingAssistant } from '@/src/components/FloatingAssistant';
 
 interface TranslatorProps {
   settings: AppSettings;
@@ -126,6 +136,9 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isPolishing, setIsPolishing] = useState(false);
+  const [isMagicActive, setIsMagicActive] = useState(false);
+  const [magicQuery, setMagicQuery] = useState("");
+  const [isClassifying, setIsClassifying] = useState(false);
   const [audioState, setAudioState] = useState<'idle' | 'playing' | 'paused' | 'loading'>('idle');
   const [ttsFeedback, setTtsFeedback] = useState<string | null>(null);
   const [translationSource, setTranslationSource] = useState<'server' | 'client' | null>(null);
@@ -135,6 +148,8 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [detectedSuggestion, setDetectedSuggestion] = useState<string | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [isOutdated, setIsOutdated] = useState(false);
+  const [isValidatingQuality, setIsValidatingQuality] = useState(false);
+  const [isQualityIssue, setIsQualityIssue] = useState(false);
   const [toast, setToast] = useState<{ message: string; visible: boolean; id: number } | null>(null);
 
   const ttsTimeoutRef = useRef<number | null>(null);
@@ -363,7 +378,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     }
   };
 
-  const handleTranslate = async (isPolish?: boolean) => {
+  const handleTranslate = async (adjustmentStyle?: string) => {
     if (!inputText.trim()) return;
 
     if (!navigator.onLine) {
@@ -371,14 +386,18 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       return;
     }
 
-    if (fromLang !== 'auto' && fromLang === toLang) {
+    // Permitir idiomas iguais se for um ajuste de texto (Assistant mode)
+    const isAdjustment = !!adjustmentStyle || (fromLang !== 'auto' && fromLang === toLang);
+    
+    if (!isAdjustment && fromLang !== 'auto' && fromLang === toLang) {
       setError("Selecione idiomas diferentes para traduzir");
       return;
     }
     
-    const applyFluency = !!isPolish;
+    const targetStyle = adjustmentStyle || settings.translationStyle;
+    const isRefining = !!adjustmentStyle;
     
-    if (isPolish) {
+    if (isRefining) {
       setIsPolishing(true);
     } else {
       setIsLoading(true);
@@ -386,7 +405,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     setError(null);
     setIsOutdated(false);
     
-    if (!isPolish) {
+    if (!isRefining) {
       setTranslatedText("");
       setComparisonResults(null);
     }
@@ -401,7 +420,11 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
       // Rule 1 & 3: Sequential fallback handled inside unifiedTranslate
       const chunkPromises = chunks.map(chunk => 
-        unifiedTranslate(chunk, fromLang, toLang, { ...settings, translationStyle: applyFluency ? 'fluent' : settings.translationStyle })
+        unifiedTranslate(chunk, fromLang, toLang, { 
+          ...settings, 
+          translationStyle: targetStyle as any,
+          isAdjustment
+        })
       );
 
       const results = await Promise.all(chunkPromises);
@@ -413,6 +436,21 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
       setTranslatedText(combinedText);
       setTranslationSource(finalSource);
+      
+      // Qualidade IA Check
+      setIsValidatingQuality(true);
+      setIsQualityIssue(false);
+      try {
+        const isFine = await validateTranslationQuality(inputText, combinedText, settings.geminiApiKey);
+        if (!isFine) {
+          setIsQualityIssue(true);
+          console.warn('[QUALITY_ALERT] Tradução sinalizada como potencialmente inconsistente.');
+        }
+      } catch (e) {
+        console.error("Quality check fail:", e);
+      } finally {
+        setIsValidatingQuality(false);
+      }
       
       const newTranslation: Translation = {
         id: crypto.randomUUID(),
@@ -457,6 +495,23 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     setInputText(translatedText);
     setTranslatedText(inputText);
     setError(null);
+  };
+
+  const handleMagicCommand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!magicQuery.trim() || isClassifying || !translatedText) return;
+
+    setIsClassifying(true);
+    try {
+      const mode = await classifyAdjustmentMode(magicQuery, settings.geminiApiKey);
+      setMagicQuery("");
+      setIsMagicActive(false);
+      handleTranslate(mode);
+    } catch (error) {
+      console.error("Magic fail:", error);
+    } finally {
+      setIsClassifying(false);
+    }
   };
 
   const handleCopy = () => {
@@ -1055,24 +1110,120 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
               className="p-8 rounded-[40px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-white/10 relative group min-h-[220px] flex flex-col justify-between shadow-2xl shadow-purple-500/5 transition-all"
             >
               <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/5">
-                   <div className="flex flex-col gap-0.5">
-                    <span className="text-[10px] font-black uppercase tracking-[3px] text-[#3F8EFC] opacity-70">Resultado IA</span>
-                    <span className="text-xs font-bold">{LANGUAGES.find(l => l.code === toLang)?.name}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => handleTranslate(true)}
-                      disabled={isPolishing}
-                      className={cn(
-                        "px-4 py-2 bg-gradient-to-r from-purple-500/10 to-blue-500/10 hover:from-purple-500/20 hover:to-blue-500/20 rounded-2xl text-[10px] font-black uppercase tracking-[2px] transition-all flex items-center gap-2 border border-purple-500/10",
-                        isPolishing && "animate-pulse brightness-90 shadow-none pointer-events-none"
-                      )}
-                      title="Polir fluência para soar mais natural"
+                <AnimatePresence>
+                  {isMagicActive && (
+                    <motion.form 
+                      initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      animate={{ opacity: 1, height: 'auto', marginBottom: 16 }}
+                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      onSubmit={handleMagicCommand}
+                      className="overflow-hidden"
                     >
-                      {isPolishing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} className="text-purple-500" />}
-                      <span>{isPolishing ? 'Polindo...' : 'Polir Fluência'}</span>
+                      <div className="relative group/input">
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-500">
+                          <Zap size={14} className={cn(isClassifying && "animate-pulse")} />
+                        </div>
+                        <input 
+                          autoFocus
+                          value={magicQuery}
+                          onChange={(e) => setMagicQuery(e.target.value)}
+                          placeholder="Ex: Deixe mais profissional..."
+                          className="w-full bg-slate-50 dark:bg-zinc-800/50 border border-purple-500/20 rounded-2xl py-3 pl-10 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all font-medium"
+                          disabled={isClassifying}
+                        />
+                        <button 
+                          type="submit"
+                          disabled={!magicQuery.trim() || isClassifying}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-purple-500 text-white rounded-xl hover:bg-purple-600 disabled:opacity-50 transition-all"
+                        >
+                          {isClassifying ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                        </button>
+                      </div>
+                    </motion.form>
+                  )}
+                </AnimatePresence>
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/5">
+                   <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-black uppercase tracking-[3px] text-[#3F8EFC] opacity-70">Resultado IA</span>
+                      <span className="text-xs font-bold">{LANGUAGES.find(l => l.code === toLang)?.name}</span>
+                    </div>
+
+                    {/* Badge de Qualidade */}
+                    <AnimatePresence>
+                      {isValidatingQuality ? (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-zinc-800 rounded-full border border-slate-200 dark:border-white/5"
+                        >
+                          <Loader2 size={10} className="animate-spin text-slate-400" />
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-slate-500">Auditoria IA...</span>
+                        </motion.div>
+                      ) : isQualityIssue ? (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 rounded-full border border-amber-200 dark:border-amber-900/30"
+                        >
+                          <ShieldAlert size={10} className="text-amber-500" />
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">Verificar Conteúdo</span>
+                        </motion.div>
+                      ) : (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="flex items-center gap-1.5 px-2 py-0.5 bg-green-50 dark:bg-green-900/20 rounded-full border border-green-200 dark:border-green-900/30"
+                        >
+                          <ShieldCheck size={10} className="text-green-500" />
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-green-600 dark:text-green-400">Auditado</span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <div className="flex flex-wrap gap-2 justify-end">
+                    {/* Comando Mágico Toggle */}
+                    <button 
+                      onClick={() => setIsMagicActive(!isMagicActive)}
+                      className={cn(
+                        "p-2 rounded-xl transition-all border",
+                        isMagicActive 
+                          ? "bg-purple-500 text-white border-purple-600 shadow-lg shadow-purple-500/20" 
+                          : "bg-slate-50 dark:bg-zinc-800 text-slate-500 hover:text-purple-500 border-slate-200 dark:border-white/5"
+                      )}
+                      title="Comando Mágico IA"
+                    >
+                      <Wand2 size={14} />
                     </button>
+
+                    <div className="w-px h-6 bg-slate-200 dark:bg-zinc-800 mx-1 self-center" />
+
+                    {/* Botões do Assistente Inteligente */}
+                    {[
+                      { id: 'fluent', label: 'Natural', icon: <Sparkles size={12} className="text-purple-500" />, title: 'Tornar mais fluente' },
+                      { id: 'informal', label: 'Informal', icon: <MessageSquare size={12} className="text-blue-500" />, title: 'Linguagem casual' },
+                      { id: 'formal', label: 'Formal', icon: <Scale size={12} className="text-amber-500" />, title: 'Linguagem educada' },
+                      { id: 'professional', label: 'Pro', icon: <Briefcase size={12} className="text-slate-500" />, title: 'Linguagem técnica' },
+                      { id: 'correct', label: 'Corrigir', icon: <CheckCircle size={12} className="text-green-500" />, title: 'Corrigir gramática' }
+                    ].map((mode) => (
+                      <button 
+                        key={mode.id}
+                        onClick={() => handleTranslate(mode.id)}
+                        disabled={isPolishing || isLoading}
+                        className={cn(
+                          "px-3 py-1.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 rounded-xl text-[9px] font-black uppercase tracking-[1.5px] transition-all flex items-center gap-1.5 border border-slate-200 dark:border-white/5",
+                          isPolishing && "opacity-50 pointer-events-none"
+                        )}
+                        title={mode.title}
+                      >
+                        {isPolishing ? <Loader2 size={12} className="animate-spin" /> : mode.icon}
+                        <span className="hidden sm:inline">{mode.label}</span>
+                      </button>
+                    ))}
+
+                    <div className="w-px h-6 bg-slate-200 dark:bg-zinc-800 mx-1 self-center" />
+                    
                     <AudioControls 
                       state={audioState}
                       onPlay={() => handleAudioControl('play', translatedText, toLang)}
@@ -1083,7 +1234,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                     />
                     <button 
                       onClick={handleCopy}
-                      className="p-3 bg-slate-50 dark:bg-zinc-800 rounded-2xl text-slate-500 hover:text-[#7B3FE4] shadow-sm transition-all active:scale-90"
+                      className="p-3 bg-slate-50 dark:bg-zinc-800 rounded-2xl text-slate-500 hover:text-[#7B3FE4] shadow-sm transition-all active:scale-90 border border-slate-200 dark:border-white/5"
                       title="Copiar"
                     >
                       {copied ? <Check className="text-green-500" size={22} /> : <Copy size={22} />}
@@ -1129,6 +1280,17 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           </motion.div>
         )}
       </AnimatePresence>
+
+      <FloatingAssistant 
+        currentTranslation={translatedText}
+        fromLang={fromLang}
+        toLang={toLang}
+        settings={settings}
+        onApplyAdjustment={(newText) => {
+          setTranslatedText(newText);
+          showToast("Ajuste aplicado!");
+        }}
+      />
     </div>
   </div>
 );

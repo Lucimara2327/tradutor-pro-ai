@@ -17,8 +17,9 @@ export interface AppSettings {
   model: string;
   engine: 'gemini' | 'openai';
   comparisonMode: boolean;
-  translationStyle: 'normal' | 'fluent' | 'formal' | 'informal';
+  translationStyle: 'normal' | 'fluent' | 'formal' | 'informal' | 'professional' | 'correct';
   audioSpeed: number;
+  isAdjustment?: boolean;
 }
 
 export type LanguageCode = string;

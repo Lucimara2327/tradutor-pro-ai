@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import OpenAI from 'openai';
+import { getTranslationPrompt } from './src/services/prompts.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,9 +17,8 @@ async function startServer() {
 
   // API Route
   app.post('/api/translate', async (req, res) => {
-    const { text, fromLang, toLang, engine, model, fluentMode, translationStyle, openaiApiKey } = req.body;
-    const isFluent = !!fluentMode;
-    const style = translationStyle || (isFluent ? 'fluent' : 'normal');
+    const { text, fromLang, toLang, engine, model, translationStyle, openaiApiKey, isAdjustment } = req.body;
+    const style = translationStyle || 'normal';
 
     if (engine !== 'openai') {
       return res.status(400).json({ error: 'Unsupported backend engine' });
@@ -37,43 +37,27 @@ async function startServer() {
       const openai = new OpenAI({ apiKey });
       const openaiModel = model?.startsWith('gemini') ? 'gpt-4o-mini' : (model || 'gpt-4o-mini');
 
-      let styleInstruction = "";
-      if (isFluent) {
-        styleInstruction = "- FLUENTE: natural, mas sem alterar sentido.";
-      } else if (style === 'formal') {
-        styleInstruction = "- FORMAL: linguagem educada e correta.";
-      } else if (style === 'informal') {
-        styleInstruction = "- INFORMAL: linguagem leve e comum.";
-      } else {
-        styleInstruction = "- NORMAL: tradução direta e fiel.";
-      }
+      const prompt = getTranslationPrompt({
+        fromLang,
+        toLang,
+        style: style as any,
+        text,
+        isAdjustment: !!isAdjustment
+      });
 
       const response = await openai.chat.completions.create({
         model: openaiModel,
         messages: [
           {
             role: 'system',
-            content: `Traduza o texto de forma precisa e segura para o idioma de destino.
-
-Regras obrigatórias:
-- NÃO inventar conteúdo.
-- NÃO adicionar palavras que não existem no original.
-- NÃO usar linguagem ofensiva.
-- Manter o significado original da frase.
-- Adaptar levemente apenas para soar natural.
-- Se a frase for simples, manter a tradução simples.
-
-Estilo solicitado:
-${styleInstruction}
-
-IMPORTANTE: Retorne APENAS a tradução final, sem aspas e sem explicações.`
+            content: prompt
           },
           {
             role: 'user',
             content: text,
           },
         ],
-        temperature: style === 'informal' ? 0.3 : 0.1,
+        temperature: style === 'informal' ? 0.3 : 0.05,
       });
 
       const translatedText = response.choices[0]?.message?.content?.trim() || '';

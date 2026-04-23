@@ -1,7 +1,9 @@
 
-import { translateWithGemini, speakWithGemini } from './gemini';
+import { translateWithGemini, speakWithGemini, classifyAdjustmentMode, validateTranslationQuality } from './gemini';
 import { translateText as translateWithOpenAI } from './openai';
 import { AppSettings } from '../types';
+
+export { classifyAdjustmentMode, validateTranslationQuality };
 
 export interface TranslationResult {
   text: string;
@@ -63,7 +65,7 @@ const handleApiError = (error: any, context: string) => {
   
   // Categorize quota/rate limit errors as non-critical warnings for the developer
   const isQuotaError = msg.includes('429') || msg.includes('quota') || msg.includes('rate_limit') || msg.includes('credits');
-  const isAuthError = msg.includes('401') || msg.includes('invalid_key') || msg.includes('apikey');
+  const isAuthError = msg.includes('401') || msg.includes('invalid_key') || msg.includes('apikey') || msg.includes('config_missing_key');
   
   if (isQuotaError) {
     if (context.toLowerCase().includes('openai')) {
@@ -80,7 +82,7 @@ const handleApiError = (error: any, context: string) => {
   }
 
   // Identifica erros comuns para log técnico apenas (ex: WebSocket, Network)
-  if (msg.includes('websocket') || msg.includes('timeout') || msg.includes('fetch') || msg.includes('400')) {
+  if (msg.includes('websocket') || msg.includes('timeout') || msg.includes('fetch') || msg.includes('400') || msg.includes('network_or_proxy_error')) {
     console.warn(`[DEVELOPER_LOG] ${context}: Network/System detail: ${msg}`);
   } else {
     console.error(`[DEVELOPER_LOG] ${context} - Error detail:`, error);
@@ -154,8 +156,7 @@ async function translateLocal(text: string, fromLang: string, toLang: string): P
   // 3. Fallback Heurístico (Heurística de segurança)
   // Se tudo falhar, retorna o texto original limpo. 
   // Removemos qualquer formatação suspeita que possa ter sido injetada por APIs quebradas.
-  const safeText = text.replace(/<[^>]*>?/gm, '').trim(); 
-  return safeText; 
+  return text.trim(); 
 }
 
 // 7. VALIDAÇÃO DE RESPOSTA (isValidTranslation)
@@ -164,37 +165,21 @@ const isValidTranslation = (original: string, translated: string | null | undefi
   const cleanOrig = original.trim().toLowerCase();
   const cleanTrans = translated.trim().toLowerCase();
 
-  // 1. Proibir frases iguais ao original (apenas para textos minimamente longos)
-  if (original.length > 5 && cleanOrig === cleanTrans) return false;
+  // 1. Proibir frases iguais ao original (apenas para textos significativos)
+  if (original.length > 15 && cleanOrig === cleanTrans) return false;
 
-  // 2. Proibir explicações comuns da IA ou recusas e erros de cota/limite
-  const hallucinations = [
-    'here is the translation', 'tradução:', 'the translation is', 'translated to', 
-    'claro, aqui está', 'tradução fiel:', 'desculpe', 'não posso traduzir', 
-    'as an ai', 'como um modelo de linguagem', 'tradução profissional', 
-    'significado original:', 'texto original:', 'traduzido de', 'a tradução é',
+  // 2. Proibir recusas explícitas e erros de sistema técnicos
+  const technicalErrors = [
     'quota exceeded', 'rate limit', 'insufficient credits', 'billing', 
-    'unexpected error', 'api error', 'try again later', 'limit reached'
+    'unexpected error', 'api error', 'try again later', 'limit reached',
+    'internal server error', 'service unavailable'
   ];
-  if (hallucinations.some(h => cleanTrans.includes(h))) return false;
+  if (technicalErrors.some(h => cleanTrans.includes(h))) return false;
 
-  // 4. Se a IA colocar o texto entre aspas quando não deveria
-  if (translated.startsWith('"') && translated.endsWith('"') && !original.startsWith('"')) {
-    return false; // Forçar a IA a enviar o texto limpo sem aspas extras na próxima tentativa
-  }
-
-  // 5. Detecção básica de conteúdo ofensivo (Safety Gate)
-  const offensiveTerms = ['fuck', 'shit', 'bitch', 'asshole']; // Lista básica para exemplo
-  if (offensiveTerms.some(term => cleanTrans.includes(term))) {
-    console.warn('[SAFETY_BLOCK] Conteúdo ofensivo detectado na tradução.');
-    return false;
-  }
-
-  // 6. Validação de Comprimento Heurística
-  if (original.length > 30) {
-     const ratio = translated.length / original.length;
-     if (ratio < 0.15 || ratio > 6) return false;
-  }
+  // 3. Se a resposta for uma recusa de segurança da IA (mas sem ser erro técnico)
+  // No modo "dúvida", preferimos aceitar do que bloquear, a menos que seja claramente uma recusa
+  const refusals = ['não posso traduzir', 'desculpe', 'como um modelo de linguagem', 'não tenho permissão'];
+  if (refusals.some(r => cleanTrans.includes(r)) && cleanTrans.length < original.length / 2) return false;
 
   return true;
 };
@@ -216,6 +201,7 @@ export async function unifiedTranslate(
   // Solo try one engine
   async function performSingleTranslation(targetEngine: 'openai' | 'gemini'): Promise<TranslationResult> {
     const activeStyle = settings.translationStyle;
+    const isAdjustment = !!settings.isAdjustment;
     
     if (targetEngine === 'openai' && !isOpenAIAvailable()) {
       throw new Error('OPENAI_QUOTA_COOLDOWN');
@@ -229,14 +215,13 @@ export async function unifiedTranslate(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-              text, fromLang, toLang, engine: 'openai', model: 'gpt-4o-mini', translationStyle: activeStyle, openaiApiKey
+              text, fromLang, toLang, engine: 'openai', model: 'gpt-4o-mini', translationStyle: activeStyle, openaiApiKey, isAdjustment
             })
           }), 12000);
 
           if (response.ok) {
             const data = await response.json();
             if (data.translatedText && isValidTranslation(text, data.translatedText)) {
-              console.log(`[DEBUG] OpenAI successful (via Server)`);
               return { text: data.translatedText, source: 'server' };
             }
           }
@@ -246,50 +231,62 @@ export async function unifiedTranslate(
         }
 
         // 2. Tentar OpenAI via Client-side
-        const clientText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, 'gpt-4o-mini', activeStyle === 'fluent'), 12000);
-        if (isValidTranslation(text, clientText)) {
-          console.log(`[DEBUG] OpenAI successful (via Client)`);
-          return { text: clientText, source: 'client' };
+        if (openaiApiKey) {
+          try {
+            const clientText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, 'gpt-4o-mini', activeStyle, isAdjustment), 15000);
+            if (isValidTranslation(text, clientText)) {
+              return { text: clientText, source: 'client' };
+            }
+          } catch (e) {
+            handleApiError(e, 'OpenAI_Client_Attempt');
+          }
         }
-        throw new Error('OPENAI_INVALID_RESULT');
+        
+        throw new Error('OPENAI_FAILED');
       } else {
         // Gemini Attempt
-        const geminiModel = "models/gemini-1.5-flash";
-        const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeStyle), 15000);
-        if (isValidTranslation(text, resultText)) {
-          console.log(`[DEBUG] Gemini successful fallback`);
-          return { text: resultText, source: 'client' };
+        try {
+          const geminiModel = "models/gemini-3-flash-preview";
+          const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeStyle, isAdjustment), 15000);
+          if (isValidTranslation(text, resultText)) {
+            return { text: resultText, source: 'client' };
+          }
+        } catch (e) {
+          handleApiError(e, 'Gemini_Attempt');
         }
-        throw new Error('GEMINI_INVALID_RESULT');
+        
+        throw new Error('GEMINI_FAILED');
       }
     } catch (err: any) {
-      console.warn(`[DEBUG] ${targetEngine.toUpperCase()} failed:`, err.message || err);
       throw err;
     }
   }
 
   try {
     // SEQUENTIAL FALLBACK LOGIC
-    // 1. Always try OpenAI first (Rule 1)
+    // 1. OpenAI
     try {
       const res = await performSingleTranslation('openai');
       translationCache.set(cacheKey, res);
       return res;
     } catch (openaiErr) {
-      // 2. Fallback to Gemini if OpenAI fails (Rule 3)
+      // 2. Gemini
       console.log("[DEBUG] Primary AI failed. Engaging Gemini fallback...");
       try {
         const res = await performSingleTranslation('gemini');
         translationCache.set(cacheKey, res);
         return res;
       } catch (geminiErr) {
-        // 3. Last resort: Offline/Dictionary (Rule 6 but with fallback message)
-        console.warn("[DEBUG] All AIs failed.");
-        throw new Error("Não foi possível traduzir agora. Tente novamente.");
+        // 3. Local/Offline Fallback (Regra: Tentar de tudo antes de dar erro)
+        console.warn("[DEBUG] All AIs failed. Using local fallback.");
+        const localText = await translateLocal(text, fromLang, toLang);
+        const res = { text: localText, source: 'client' as const };
+        translationCache.set(cacheKey, res);
+        return res;
       }
     }
   } catch (finalError: any) {
-    // Ensure we throw the friendly message for the UI (Rule 6)
+    // Só chegamos aqui se até o translateLocal falhou drasticamente
     throw new Error("Não foi possível traduzir agora. Tente novamente.");
   }
 }
