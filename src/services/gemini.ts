@@ -91,12 +91,12 @@ export async function translateWithGemini(
   translationStyle: 'normal' | 'fluent' | 'formal' | 'informal' | 'professional' | 'correct' = 'normal',
   isAdjustment: boolean = false
 ): Promise<string> {
-  const style = translationStyle;
+  const models = ["gemini-3-flash-lite-preview", "gemini-3-flash-preview"];
 
-  async function attempt(retryCount = 0): Promise<string> {
+  async function attempt(modelIndex = 0): Promise<string> {
     try {
+      const model = models[modelIndex];
       const ai = getGeminiClient(apiKey);
-      const model = "gemini-3-flash-preview";
 
       const prompt = getTranslationPrompt({
         fromLang,
@@ -106,14 +106,13 @@ export async function translateWithGemini(
         isAdjustment
       });
 
-      console.log(`[DEBUG] Gemini Request - Model: ${model} | Target: ${toLang}`);
-      console.log(`[DEBUG] Prompt Sent:`, prompt);
+      console.log(`[DEBUG] Modelo usado: ${model} | Target: ${toLang}`);
 
       const response = await ai.models.generateContent({
         model: model,
         contents: prompt,
         config: {
-          temperature: 0,
+          temperature: isAdjustment ? 0.4 : 0,
         }
       });
 
@@ -124,7 +123,10 @@ export async function translateWithGemini(
 
       return translated;
     } catch (error: any) {
-      if (retryCount < 1) return await attempt(retryCount + 1);
+      if (modelIndex < models.length - 1) {
+        console.warn(`[DEBUG] Fallback to ${models[modelIndex + 1]} due to error:`, error.message);
+        return await attempt(modelIndex + 1);
+      }
       
       let errorMsg = error.message || String(error);
       try {
@@ -137,13 +139,19 @@ export async function translateWithGemini(
         // Not JSON, keep original
       }
 
-      console.error('Gemini attempt failed:', errorMsg);
+      // Normalize errors
+      const isQuota = errorMsg.includes('quota') || errorMsg.includes('limit') || errorMsg.includes('429');
+      const isNetwork = errorMsg.includes('xhr error') || errorMsg.includes('Rpc failed') || errorMsg.includes('network');
       
-      // Normalize errors for the orchestrator
+      if (!isQuota && !isNetwork) {
+        console.error('Gemini attempt failed:', errorMsg);
+      }
+      
+      if (isQuota) throw new Error('RATE_LIMIT');
+      if (isNetwork) throw new Error('NETWORK_OR_PROXY_ERROR');
+      
       if (errorMsg.includes('API key not valid')) throw new Error('INVALID_KEY');
-      if (errorMsg.includes('quota exceeded')) throw new Error('RATE_LIMIT');
       if (errorMsg.includes('not found')) throw new Error('MODEL_NOT_FOUND');
-      if (errorMsg.includes('xhr error') || errorMsg.includes('Rpc failed')) throw new Error('NETWORK_OR_PROXY_ERROR');
       
       throw new Error(errorMsg);
     }
@@ -152,7 +160,9 @@ export async function translateWithGemini(
   try {
     return await attempt();
   } catch (error: any) {
-    console.error('Gemini catastrophic failure:', error);
+    if (error.message !== 'RATE_LIMIT') {
+      console.error('Gemini catastrophic failure:', error);
+    }
     throw error;
   }
 }
@@ -169,7 +179,7 @@ export async function classifyAdjustmentMode(
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-flash-lite-preview",
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         temperature: 0,
@@ -204,7 +214,7 @@ export async function validateTranslationQuality(
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-flash-lite-preview",
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         temperature: 0,

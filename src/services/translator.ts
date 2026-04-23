@@ -8,6 +8,7 @@ export { classifyAdjustmentMode, validateTranslationQuality };
 export interface TranslationResult {
   text: string;
   source: 'server' | 'client';
+  modelUsed?: string;
 }
 
 const translationCache = new Map<string, TranslationResult>();
@@ -26,6 +27,11 @@ let isOpenAIDisabled = false;
 let openaiDisabledTimestamp = 0;
 const OPENAI_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos de pausa
 
+// --- Logica de desativação temporária do Gemini (429) ---
+let isGeminiDisabled = false;
+let geminiDisabledTimestamp = 0;
+const GEMINI_COOLDOWN_MS = 60 * 1000; // 1 minuto de pausa
+
 export function isOpenAIAvailable(): boolean {
   if (isOpenAIDisabled) {
     const now = Date.now();
@@ -38,12 +44,31 @@ export function isOpenAIAvailable(): boolean {
   return true;
 }
 
+export function isGeminiAvailable(): boolean {
+  if (isGeminiDisabled) {
+    const now = Date.now();
+    if (now - geminiDisabledTimestamp > GEMINI_COOLDOWN_MS) {
+      isGeminiDisabled = false;
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+
 const deactivateOpenAI = () => {
   if (!isOpenAIDisabled) {
     isOpenAIDisabled = true;
     openaiDisabledTimestamp = Date.now();
-    // System notice remains in console only
-    console.warn(`[DEVELOPER_LOG] System Notice: OpenAI temporarily suspended (429). Routing traffic to Gemini.`);
+    console.warn(`[DEVELOPER_LOG] OpenAI suspended (429).`);
+  }
+};
+
+const deactivateGemini = () => {
+  if (!isGeminiDisabled) {
+    isGeminiDisabled = true;
+    geminiDisabledTimestamp = Date.now();
+    console.warn(`[DEVELOPER_LOG] Gemini suspended (429/Quota).`);
   }
 };
 
@@ -70,9 +95,11 @@ const handleApiError = (error: any, context: string) => {
   if (isQuotaError) {
     if (context.toLowerCase().includes('openai')) {
       deactivateOpenAI();
+    } else if (context.toLowerCase().includes('gemini')) {
+      deactivateGemini();
     }
     // Technical log remains in console only
-    console.warn(`[DEVELOPER_LOG] ${context}: Quota/Rate limit encountered. Fallback logic engaged.`);
+    console.warn(`[DEVELOPER_LOG] ${context}: Quota/Rate limit encountered.`);
     return;
   }
 
@@ -206,6 +233,9 @@ export async function unifiedTranslate(
     if (targetEngine === 'openai' && !isOpenAIAvailable()) {
       throw new Error('OPENAI_QUOTA_COOLDOWN');
     }
+    if (targetEngine === 'gemini' && !isGeminiAvailable()) {
+      throw new Error('GEMINI_QUOTA_COOLDOWN');
+    }
 
     try {
       if (targetEngine === 'openai') {
@@ -301,33 +331,52 @@ export async function unifiedSpeak(
   return speakWithGemini(text, settings.geminiApiKey, voiceName);
 }
 
+// --- Logica de desativação temporária da Detecção (429) ---
+let isDetectionDisabled = false;
+let detectionDisabledTimestamp = 0;
+const DETECTION_COOLDOWN_MS = 60 * 1000; // 1 minuto
+
 /**
  * Detect language using Gemini (client-side)
  */
 export async function detectLanguage(text: string, settings: AppSettings): Promise<string | null> {
   if (!text || text.trim().length < 3) return null;
 
+  // Check cooldown
+  if (isDetectionDisabled) {
+    if (Date.now() - detectionDisabledTimestamp > DETECTION_COOLDOWN_MS) {
+      isDetectionDisabled = false;
+    } else {
+      return null;
+    }
+  }
+
   try {
-    const { translateWithGemini } = await import('./gemini');
-    // We use a specific prompt for detection
+    const genAI = (await import('./gemini')).getGeminiClient(settings.geminiApiKey);
     const prompt = `Identify the language of the following text. 
 Return ONLY the ISO 639-1 two-letter code (e.g., 'pt', 'en', 'es', 'fr').
 If you cannot identify it, return 'unknown'.
 
 Text: ${text.substring(0, 100)}`;
 
-    const genAI = (await import('./gemini')).getGeminiClient(settings.geminiApiKey);
-    const model = genAI.models.generateContent({
+    const response = (await withTimeout(genAI.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt
-    });
+    }), 5000)) as any;
 
-    const response = await model;
     const code = response.text.trim().toLowerCase();
-    
     return code === 'unknown' ? null : code;
-  } catch (error) {
-    console.error('Language detection error:', error);
+  } catch (error: any) {
+    const errorMsg = error?.message || String(error);
+    const isQuota = errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED');
+    
+    if (isQuota) {
+      isDetectionDisabled = true;
+      detectionDisabledTimestamp = Date.now();
+      console.warn('[DEVELOPER_LOG] Language detection quota hit. Cooldown activated.');
+    } else {
+      console.warn('[DEVELOPER_LOG] Language detection failed:', errorMsg);
+    }
     return null;
   }
 }

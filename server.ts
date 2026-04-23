@@ -57,7 +57,7 @@ async function startServer() {
             content: text,
           },
         ],
-        temperature: style === 'informal' ? 0.3 : 0.05,
+        temperature: isAdjustment ? 0.4 : (style === 'informal' ? 0.3 : 0.05),
       });
 
       const translatedText = response.choices[0]?.message?.content?.trim() || '';

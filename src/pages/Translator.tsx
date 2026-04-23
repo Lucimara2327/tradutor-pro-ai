@@ -1252,7 +1252,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
                       "w-1.5 h-1.5 rounded-full animate-pulse",
                       translationSource === 'server' ? "bg-green-500" : "bg-orange-500"
                     )} />
-                    <span>Processado via {settings.engine.toUpperCase()} • {translationSource === 'server' ? 'SEGURO' : 'MODO OFFLINE'}</span>
+                    <span>Processado via {settings.engine.toUpperCase()} ({settings.model}) • {translationSource === 'server' ? 'SEGURO' : 'MODO OFFLINE'}</span>
                  </div>
                  <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest hidden sm:block">
                    ID: {Math.random().toString(36).substring(7).toUpperCase()}

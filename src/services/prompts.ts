@@ -27,23 +27,23 @@ export function getTranslationPrompt(options: PromptOptions): string {
   switch (style) {
     case 'fluent':
       modeName = "natural";
-      styleInstruction = "- MODO NATURAL: Torne o texto mais fluente, orgânico e nativo, melhorando a conexão entre frases sem alterar o sentido.";
+      styleInstruction = "- MODO NATURAL: Reescreva o texto para soar como um nativo falando naturalmente. Priorize a fluidez orgânica e expressões comuns, mudando a estrutura se necessário para máxima naturalidade.";
       break;
     case 'formal':
       modeName = "formal";
-      styleInstruction = "- MODO FORMAL: Use uma linguagem educada, erudita e profissional, mantendo a correção gramatical elevada.";
+      styleInstruction = "- MODO FORMAL: Transforme em uma comunicação oficial, erudita e altamente estruturada. Use um vocabulário elevado e preserve a etiqueta linguística.";
       break;
     case 'informal':
       modeName = "informal";
-      styleInstruction = "- MODO INFORMAL: Use uma linguagem leve, casual e comum, simulando uma conversa cotidiana.";
+      styleInstruction = "- MODO INFORMAL: Converta para uma linguagem relaxada e casual. Use um tom de conversa cotidiana entre amigos, permitindo contrações e expressões leves.";
       break;
     case 'professional':
       modeName = "profissional";
-      styleInstruction = "- MODO PROFISSIONAL: Use uma linguagem técnica, precisa e corporativa, ideal para contextos de trabalho.";
+      styleInstruction = "- MODO PROFISSIONAL: Utilize terminologia de negócios, corporativa e técnica. Foque em clareza, objetividade e polimento máximo para contextos de trabalho.";
       break;
     case 'correct':
       modeName = "corrigir";
-      styleInstruction = "- MODO CORRIGIR: Corrija estritamente erros de gramática, ortografia e pontuação sem alterar o vocabulário ou o estilo original.";
+      styleInstruction = "- MODO CORRIGIR: Foque 100% na precisão gramatical normativa e ortográfica. Elimine erros sem necessariamente elevar o tom, mas garantindo que o texto seja impecável.";
       break;
     default:
       modeName = "direto";
@@ -54,20 +54,18 @@ export function getTranslationPrompt(options: PromptOptions): string {
   // Se for apenas ajuste de texto (mesmo idioma ou flag isAdjustment)
   if (isAdjustment || (fromLang === toLang && fromLang !== 'auto')) {
     return `Você é o assistente inteligente do Lumi Translate.
-Sua função é ajustar o texto fornecido com base no modo solicitado.
+Sua função é transformar o texto fornecido para o estilo específico solicitado.
 
-REGRAS RÍGIDAS:
-- NUNCA invente conteúdo.
-- NUNCA altere o significado original do texto.
-- Apenas transforme o estilo ou corrija erros conforme o modo.
-- Seja estritamente direto e claro.
-- NÃO explique nada nem adicione introduções.
-- Retorne APENAS o texto transformado.
+REGRAS RÍGIDAS DE VARIÂNCIA:
+1. RESULTADO ÚNICO: Você DEVE gerar uma NOVA versão do texto. Nunca retorne o texto idêntico ao original, mesmo que pareça correto.
+2. DISTINÇÃO ESTILÍSTICA: O resultado deve ser VISIVELMENTE diferente dependendo do modo. Cada modo tem uma assinatura única.
+3. SEM EXPLICAÇÕES: Retorne APENAS o texto final refinado. Proibido introduções ou comentários.
+4. FIDELIDADE SEMÂNTICA: Mude o estilo, mas preserve o significado original.
 
 Modo solicitado: ${modeName}
-Diretriz de estilo: ${styleInstruction}
+Diretriz específica: ${styleInstruction}
 
-Texto para ajustar:
+Texto para transformar:
 "${text || ''}"
 `;
   }

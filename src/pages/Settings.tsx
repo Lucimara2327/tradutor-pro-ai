@@ -118,13 +118,13 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
           {settings.engine === 'gemini' ? (
             <>
               <button 
-                onClick={() => updateSetting('model', 'gemini-1.5-flash')}
+                onClick={() => updateSetting('model', 'gemini-3-flash-lite-preview')}
                 className={cn(
                   "flex-1 py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all",
-                  settings.model === 'gemini-1.5-flash' ? "bg-purple-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                  settings.model === 'gemini-3-flash-lite-preview' ? "bg-purple-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-600 dark:hover:text-white"
                 )}
               >
-                Gemini 1.5 Flash (Estável)
+                Gemini Flash-Lite (Rápido & Econômico)
               </button>
             </>
           ) : (
@@ -349,7 +349,7 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
         <h3 className="text-[10px] font-black uppercase tracking-[3px] text-slate-500 ml-2">Capacidade de Processamento</h3>
         <div className="grid grid-cols-2 gap-4">
           {(settings.engine === 'gemini' 
-            ? ['gemini-1.5-flash'] 
+            ? ['gemini-3-flash-lite-preview', 'gemini-3-flash-preview']
             : ['gpt-4o-mini', 'gpt-4o']
           ).map(model => (
             <button
@@ -360,10 +360,10 @@ export default function SettingsPage({ settings, setSettings, canInstall, onInst
                 settings.model === model 
                   ? (settings.engine === 'gemini' ? "border-[#7B3FE4] bg-[#7B3FE4]/10 text-[#7B3FE4]" : "border-[#3F8EFC] bg-[#3F8EFC]/10 text-[#3F8EFC]")
                   : "border-slate-100 dark:border-white/5 bg-white/20 dark:bg-zinc-900/40 text-slate-400 hover:border-slate-200 dark:hover:border-white/10",
-                settings.engine === 'gemini' && "col-span-2"
+                settings.engine === 'gemini' && "col-span-1"
               )}
             >
-              {model === 'gemini-1.5-flash' ? 'Gemini 1.5 Flash' : model.replace('gpt-', 'GPT ')}
+              {model === 'gemini-3-flash-lite-preview' ? 'Flash-Lite' : model === 'gemini-3-flash-preview' ? 'Flash' : model.replace('gpt-', 'GPT ')}
             </button>
           ))}
         </div>
