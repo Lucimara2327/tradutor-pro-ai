@@ -126,6 +126,9 @@ ${styleInstruction}
 Texto para traduzir:
 ${text}`;
 
+      console.log(`[DEBUG] Gemini Request - Model: ${model} | Target: ${toLang}`);
+      console.log(`[DEBUG] Full Prompt:`, prompt);
+
       const response = await ai.models.generateContent({
         model: model,
         contents: prompt,

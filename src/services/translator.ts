@@ -167,12 +167,14 @@ const isValidTranslation = (original: string, translated: string | null | undefi
   // 1. Proibir frases iguais ao original (apenas para textos minimamente longos)
   if (original.length > 5 && cleanOrig === cleanTrans) return false;
 
-  // 2. Proibir explicações comuns da IA ou recusas
+  // 2. Proibir explicações comuns da IA ou recusas e erros de cota/limite
   const hallucinations = [
     'here is the translation', 'tradução:', 'the translation is', 'translated to', 
     'claro, aqui está', 'tradução fiel:', 'desculpe', 'não posso traduzir', 
     'as an ai', 'como um modelo de linguagem', 'tradução profissional', 
-    'significado original:', 'texto original:', 'traduzido de', 'a tradução é'
+    'significado original:', 'texto original:', 'traduzido de', 'a tradução é',
+    'quota exceeded', 'rate limit', 'insufficient credits', 'billing', 
+    'unexpected error', 'api error', 'try again later', 'limit reached'
   ];
   if (hallucinations.some(h => cleanTrans.includes(h))) return false;
 
@@ -197,60 +199,6 @@ const isValidTranslation = (original: string, translated: string | null | undefi
   return true;
 };
 
-/**
- * Splits text into chunks respecting natural boundaries.
- */
-function splitIntoChunks(text: string, limit: number = 4000): string[] {
-  if (text.length <= limit) return [text];
-
-  const chunks: string[] = [];
-  let remainingText = text;
-
-  while (remainingText.length > 0) {
-    if (remainingText.length <= limit) {
-      chunks.push(remainingText);
-      break;
-    }
-
-    let splitIndex = -1;
-    const sub = remainingText.substring(0, limit);
-
-    // Prefer paragraph breaks
-    splitIndex = sub.lastIndexOf('\n\n');
-    
-    // Then line breaks
-    if (splitIndex === -1 || splitIndex < limit * 0.3) {
-      const lineBreak = sub.lastIndexOf('\n');
-      if (lineBreak > limit * 0.3) splitIndex = lineBreak;
-    }
-
-    // Then sentence endings (dot, question, exclamation + space)
-    if (splitIndex === -1 || splitIndex < limit * 0.3) {
-      const sentenceEnds = [...sub.matchAll(/[.!?]\s/g)];
-      if (sentenceEnds.length > 0) {
-        const lastMatch = sentenceEnds[sentenceEnds.length - 1];
-        splitIndex = (lastMatch.index || 0) + 1;
-      }
-    }
-
-    // Then space
-    if (splitIndex === -1 || splitIndex < limit * 0.3) {
-      const spaceIndex = sub.lastIndexOf(' ');
-      if (spaceIndex > limit * 0.3) splitIndex = spaceIndex;
-    }
-
-    // Absolute fallback
-    if (splitIndex === -1 || splitIndex < limit * 0.3) {
-      splitIndex = limit;
-    }
-
-    chunks.push(remainingText.substring(0, splitIndex).trim());
-    remainingText = remainingText.substring(splitIndex).trim();
-  }
-
-  return chunks;
-}
-
 export async function unifiedTranslate(
   text: string,
   fromLang: string,
@@ -265,110 +213,84 @@ export async function unifiedTranslate(
     return translationCache.get(cacheKey)!;
   }
 
-  // Helper to attempt a translation with specific parameters
-  async function performTranslation(currentEngine: 'gemini' | 'openai'): Promise<TranslationResult> {
+  // Solo try one engine
+  async function performSingleTranslation(targetEngine: 'openai' | 'gemini'): Promise<TranslationResult> {
     const activeStyle = settings.translationStyle;
     
-    if (currentEngine === 'openai' && !isOpenAIAvailable()) {
-      throw new Error('OPENAI_TEMPORARILY_DISABLED_QUOTA');
+    if (targetEngine === 'openai' && !isOpenAIAvailable()) {
+      throw new Error('OPENAI_QUOTA_COOLDOWN');
     }
 
-    // Loop de tentativa automática para garantir qualidade
-    for (let attemptCount = 0; attemptCount < 2; attemptCount++) {
-      try {
-        // Gemini: Always Client-side (Skill Constraint)
-        if (currentEngine === 'gemini') {
-          const geminiModel = "models/gemini-1.5-flash"; 
-          const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeStyle), 15000);
-          if (isValidTranslation(text, resultText)) {
-            return { text: resultText, source: 'client' };
-          }
-          console.warn(`[RETRY] Gemini attempt ${attemptCount + 1} produced invalid output.`);
-          continue; // Tenta de novo se inválido
-        }
-
-        // OpenAI: Try Server-side first
+    try {
+      if (targetEngine === 'openai') {
+        // 1. Tentar OpenAI via Server-side
         try {
           const response = await withTimeout(fetch('/api/translate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-              text, 
-              fromLang, 
-              toLang, 
-              engine: currentEngine, 
-              model, 
-              translationStyle: activeStyle,
-              openaiApiKey
+              text, fromLang, toLang, engine: 'openai', model: 'gpt-4o-mini', translationStyle: activeStyle, openaiApiKey
             })
-          }), 15000);
+          }), 12000);
 
           if (response.ok) {
             const data = await response.json();
             if (data.translatedText && isValidTranslation(text, data.translatedText)) {
+              console.log(`[DEBUG] OpenAI successful (via Server)`);
               return { text: data.translatedText, source: 'server' };
             }
           }
-          
-          if (response.status === 429) throw new Error('QUOTA_LIMIT');
-          
-        } catch (serverErr: any) {
-          if (serverErr.message === 'QUOTA_LIMIT') throw serverErr;
-          handleApiError(serverErr, `ServerSide_${currentEngine}`);
+          if (response.status === 429) deactivateOpenAI();
+        } catch (e) {
+          handleApiError(e, 'OpenAI_Server_Attempt');
         }
 
-        // OpenAI Client-side Fallback
-        const openaiModel = model.startsWith('gemini') ? 'gpt-4o-mini' : model;
-        const resultText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, openaiModel), 15000);
-
+        // 2. Tentar OpenAI via Client-side
+        const clientText = await withTimeout(translateWithOpenAI(text, fromLang, toLang, openaiApiKey, 'gpt-4o-mini', activeStyle === 'fluent'), 12000);
+        if (isValidTranslation(text, clientText)) {
+          console.log(`[DEBUG] OpenAI successful (via Client)`);
+          return { text: clientText, source: 'client' };
+        }
+        throw new Error('OPENAI_INVALID_RESULT');
+      } else {
+        // Gemini Attempt
+        const geminiModel = "models/gemini-1.5-flash";
+        const resultText = await withTimeout(translateWithGemini(text, fromLang, toLang, geminiApiKey, geminiModel, activeStyle), 15000);
         if (isValidTranslation(text, resultText)) {
+          console.log(`[DEBUG] Gemini successful fallback`);
           return { text: resultText, source: 'client' };
         }
-      } catch (err: any) {
-        const isQuota = err.message?.includes('429') || err.message?.includes('QUOTA') || err.message?.includes('RATE_LIMIT');
-        if (isQuota) {
-          handleApiError(err, `performTranslation_${currentEngine}`);
-          throw err;
-        }
-        
-        if (attemptCount === 1) throw err;
+        throw new Error('GEMINI_INVALID_RESULT');
       }
+    } catch (err: any) {
+      console.warn(`[DEBUG] ${targetEngine.toUpperCase()} failed:`, err.message || err);
+      throw err;
     }
-    
-    throw new Error(`${currentEngine.toUpperCase()}_MAX_RETRIES_REACHED`);
   }
 
   try {
-    let result: TranslationResult;
-
-    // FLUXO DE TRADUÇÃO SIMPLIFICADO: Respeita o motor selecionado
-    const isGeminiSelected = settings.engine === 'gemini';
-    if (isGeminiSelected) {
+    // SEQUENTIAL FALLBACK LOGIC
+    // 1. Always try OpenAI first (Rule 1)
+    try {
+      const res = await performSingleTranslation('openai');
+      translationCache.set(cacheKey, res);
+      return res;
+    } catch (openaiErr) {
+      // 2. Fallback to Gemini if OpenAI fails (Rule 3)
+      console.log("[DEBUG] Primary AI failed. Engaging Gemini fallback...");
       try {
-        result = await performTranslation('gemini');
-      } catch (err) {
-        const localText = await translateLocal(text, fromLang, toLang);
-        result = { text: localText, source: 'client' };
-      }
-    } else {
-      try {
-        result = await performTranslation('openai');
-      } catch (openaiErr) {
-        try {
-          result = await performTranslation('gemini');
-        } catch (geminiErr) {
-          const localText = await translateLocal(text, fromLang, toLang);
-          result = { text: localText, source: 'client' };
-        }
+        const res = await performSingleTranslation('gemini');
+        translationCache.set(cacheKey, res);
+        return res;
+      } catch (geminiErr) {
+        // 3. Last resort: Offline/Dictionary (Rule 6 but with fallback message)
+        console.warn("[DEBUG] All AIs failed.");
+        throw new Error("Não foi possível traduzir agora. Tente novamente.");
       }
     }
-
-    translationCache.set(cacheKey, result);
-    return result;
   } catch (finalError: any) {
-    handleApiError(finalError, 'CatastrophicFailure');
-    const finalLocalText = await translateLocal(text, fromLang, toLang);
-    return { text: finalLocalText, source: 'client' };
+    // Ensure we throw the friendly message for the UI (Rule 6)
+    throw new Error("Não foi possível traduzir agora. Tente novamente.");
   }
 }
 

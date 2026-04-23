@@ -43,6 +43,9 @@ Estilo: ${isPolishing ? `MODO POLIDO/NATURAL:
     4. Mantenha o tom original (formal/casual).
     5. NÃO mude o significado.` : 'NORMAL (tradução direta e fiel)'}`;
 
+      console.log(`[DEBUG] OpenAI Request - Model: ${model} | Target: ${toLang}`);
+      console.log(`[DEBUG] System Prompt:`, systemPrompt);
+
       const response = await client.chat.completions.create({
         model: model,
         messages: [

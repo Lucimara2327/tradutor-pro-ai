@@ -127,6 +127,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [isListening, setIsListening] = useState(false);
   const [isPolishing, setIsPolishing] = useState(false);
   const [audioState, setAudioState] = useState<'idle' | 'playing' | 'paused' | 'loading'>('idle');
+  const [ttsFeedback, setTtsFeedback] = useState<string | null>(null);
   const [translationSource, setTranslationSource] = useState<'server' | 'client' | null>(null);
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -134,8 +135,20 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   const [detectedSuggestion, setDetectedSuggestion] = useState<string | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [isOutdated, setIsOutdated] = useState(false);
+  const [toast, setToast] = useState<{ message: string; visible: boolean; id: number } | null>(null);
 
   const ttsTimeoutRef = useRef<number | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = (message: string) => {
+    const id = Date.now();
+    setToast({ message, visible: true, id });
+    
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(prev => prev?.id === id ? { ...prev, visible: false } : prev);
+    }, 3500);
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -212,6 +225,10 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
   };
 
   const speak = async (text: string, langCode: string) => {
+    if (!navigator.onLine) {
+      setError("Sem conexão com a internet. Verifique sua rede.");
+      return;
+    }
     // 1. Cancel everything immediately
     window.speechSynthesis.cancel();
     stopGeminiAudio();
@@ -221,6 +238,13 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     const speechId = ++currentSpeechIdRef.current;
     setIsSpeaking(true);
     setAudioState('loading');
+    setTtsFeedback("🧠 Ajustando fluência...");
+
+    const feedbackTimer = setTimeout(() => {
+      if (speechId === currentSpeechIdRef.current) {
+        setTtsFeedback("🔊 Preparando áudio...");
+      }
+    }, 1000);
 
     try {
       // 3. Try high-quality Gemini TTS (async fetch)
@@ -228,6 +252,8 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       
       // 4. Critical check: did someone request a different audio while we were fetching?
       if (speechId !== currentSpeechIdRef.current) {
+        clearTimeout(feedbackTimer);
+        setTtsFeedback(null);
         console.log('Aborting play: newer speech request detected');
         return;
       }
@@ -268,18 +294,26 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         if (speechId === currentSpeechIdRef.current) {
             setIsSpeaking(false);
             setAudioState('idle');
+            setTtsFeedback(null);
             currentAudioSourceRef.current = null;
         }
       };
       
       currentAudioSourceRef.current = source;
       source.start();
+      clearTimeout(feedbackTimer);
+      setTtsFeedback(null);
       setAudioState('playing');
 
     } catch (error) {
+      clearTimeout(feedbackTimer);
       if (speechId !== currentSpeechIdRef.current) return;
 
       console.warn('Gemini TTS failed, falling back to system TTS', error);
+      
+      // Feedback indicating fallback
+      setTtsFeedback("🔊 Preparando voz...");
+      
       const utterance = new SpeechSynthesisUtterance(text);
       const targetLang = langCode === 'auto' ? 'pt-BR' : langCode;
       utterance.lang = targetLang;
@@ -303,18 +337,26 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
         if (speechId === currentSpeechIdRef.current) {
           setIsSpeaking(true);
           setAudioState('playing');
+          setTtsFeedback(null);
         }
       };
       utterance.onend = () => {
         if (speechId === currentSpeechIdRef.current) {
           setIsSpeaking(false);
           setAudioState('idle');
+          setTtsFeedback(null);
         }
       };
       utterance.onerror = () => {
         if (speechId === currentSpeechIdRef.current) {
           setIsSpeaking(false);
           setAudioState('idle');
+          setTtsFeedback("Erro ao gerar áudio");
+          setTimeout(() => {
+            if (speechId === currentSpeechIdRef.current) {
+              setTtsFeedback(null);
+            }
+          }, 2000);
         }
       };
       window.speechSynthesis.speak(utterance);
@@ -323,6 +365,11 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
   const handleTranslate = async (isPolish?: boolean) => {
     if (!inputText.trim()) return;
+
+    if (!navigator.onLine) {
+      setError("Sem conexão com a internet. Verifique sua rede.");
+      return;
+    }
 
     if (fromLang !== 'auto' && fromLang === toLang) {
       setError("Selecione idiomas diferentes para traduzir");
@@ -350,95 +397,41 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     stopGeminiAudio();
 
     try {
-      const isAvailable = isOpenAIAvailable();
       const chunks = splitLongText(inputText, 400);
-      const activeSettings = { ...settings, translationStyle: applyFluency ? 'fluent' : settings.translationStyle };
 
-      if (settings.comparisonMode && isAvailable) {
-        const openaiChunksPromises = chunks.map(chunk => 
-          unifiedTranslate(chunk, fromLang, toLang, { ...activeSettings, engine: 'openai' })
-        );
-        const geminiChunksPromises = chunks.map(chunk => 
-          unifiedTranslate(chunk, fromLang, toLang, { ...activeSettings, engine: 'gemini' })
-        );
+      // Rule 1 & 3: Sequential fallback handled inside unifiedTranslate
+      const chunkPromises = chunks.map(chunk => 
+        unifiedTranslate(chunk, fromLang, toLang, { ...settings, translationStyle: applyFluency ? 'fluent' : settings.translationStyle })
+      );
 
-        const [openaiResults, geminiResults] = await Promise.all([
-          Promise.all(openaiChunksPromises),
-          Promise.all(geminiChunksPromises)
-        ]);
+      const results = await Promise.all(chunkPromises);
 
-        if (requestId !== currentRequestIdRef.current) return;
+      if (requestId !== currentRequestIdRef.current) return;
 
-        const combinedOpenAI = openaiResults.map(r => r.text).join(' ');
-        const combinedGemini = geminiResults.map(r => r.text).join(' ');
-        const lastSourceOpenAI = openaiResults[0]?.source || 'server';
-        const lastSourceGemini = geminiResults[0]?.source || 'server';
+      const combinedText = results.map(r => r.text).join(' ');
+      const finalSource = results[0]?.source || 'server';
 
-        setComparisonResults({
-          openai: combinedOpenAI,
-          gemini: combinedGemini
-        });
+      setTranslatedText(combinedText);
+      setTranslationSource(finalSource);
+      
+      const newTranslation: Translation = {
+        id: crypto.randomUUID(),
+        originalText: inputText,
+        translatedText: combinedText,
+        fromLang,
+        toLang,
+        timestamp: Date.now(),
+        isFavorite: false,
+      };
+      
+      addTranslation(newTranslation);
 
-        const finalPrimaryText = applyFluency ? combinedOpenAI : (settings.engine === 'openai' ? combinedOpenAI : combinedGemini);
-        const finalSource = applyFluency ? lastSourceOpenAI : (settings.engine === 'openai' ? lastSourceOpenAI : lastSourceGemini);
-
-        setTranslatedText(finalPrimaryText);
-        setTranslationSource(finalSource);
-
-        const newTranslation: Translation = {
-          id: crypto.randomUUID(),
-          originalText: inputText,
-          translatedText: finalPrimaryText,
-          fromLang,
-          toLang,
-          timestamp: Date.now(),
-          isFavorite: false,
-        };
-        addTranslation(newTranslation);
-
-        if (settings.autoPlayAudio) {
-          speak(finalPrimaryText, toLang);
-        }
-      } else {
-        const chunkPromises = chunks.map(chunk => 
-          unifiedTranslate(
-            chunk,
-            fromLang,
-            toLang,
-            applyFluency && !isAvailable 
-              ? { ...activeSettings, engine: 'gemini' } 
-              : activeSettings
-          )
-        );
-
-        const results = await Promise.all(chunkPromises);
-
-        if (requestId !== currentRequestIdRef.current) return;
-
-        const combinedText = results.map(r => r.text).join(' ');
-        const finalSource = results[0]?.source || 'server';
-
-        setTranslatedText(combinedText);
-        setTranslationSource(finalSource);
-        
-        const newTranslation: Translation = {
-          id: crypto.randomUUID(),
-          originalText: inputText,
-          translatedText: combinedText,
-          fromLang,
-          toLang,
-          timestamp: Date.now(),
-          isFavorite: false,
-        };
-        
-        addTranslation(newTranslation);
-
-        if (settings.autoPlayAudio) {
-          speak(combinedText, toLang);
-        }
+      if (settings.autoPlayAudio) {
+        speak(combinedText, toLang);
       }
     } catch (err: any) {
       if (requestId !== currentRequestIdRef.current) return;
+      setError(err.message || "Não foi possível traduzir agora. Tente novamente.");
       console.warn('[DEVELOPER_LOG] Translation process handled an exception:', err);
     } finally {
       if (requestId === currentRequestIdRef.current) {
@@ -643,12 +636,20 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
     return () => clearTimeout(timer);
   }, [fromLang, toLang]);
 
-  // Style Change Effect - Now just marks as outdated
+  // Style Change Effect - Now triggers a toast
   useEffect(() => {
     if (inputText.trim() && translatedText) {
       setIsOutdated(true);
+      showToast("✨ Estilo alterado — clique em 'Traduzir com IA' para atualizar");
     }
   }, [settings.translationStyle]);
+
+  // Monitor OpenAI Availability for Toast
+  useEffect(() => {
+    if (!isOpenAIAvailable()) {
+      showToast("⚠️ Serviço alternativo em uso para garantir funcionamento");
+    }
+  }, [isOpenAIAvailable()]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -743,18 +744,28 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
   return (
     <div className="relative animate-in fade-in duration-700 pb-10 overflow-x-hidden px-1 pt-2 lg:pt-4">
+      
+      {/* Toast Notification */}
       <AnimatePresence>
-        {!isOpenAIAvailable() && (
+        {toast?.visible && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="w-full max-w-[412px] mx-auto overflow-hidden px-2 mb-4"
+            initial={{ opacity: 0, y: -50, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            className="fixed top-6 left-1/2 z-[110] px-6 py-3 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xl border border-slate-200 dark:border-white/10 flex items-center gap-3 backdrop-blur-md bg-opacity-90 dark:bg-opacity-90 max-w-[90vw] w-fit pointer-events-auto"
           >
-            <div className="flex items-center justify-center gap-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest text-center">
-              <Sparkles size={12} className="animate-pulse" />
-              <span>Serviço alternativo em uso para garantir funcionamento.</span>
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+              {toast.message.includes('⚠️') ? <AlertCircle size={18} /> : <Sparkles size={18} />}
             </div>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 leading-tight">
+              {toast.message.replace(/^[^\s]+\s/, '')}
+            </p>
+            <button 
+              onClick={() => setToast(prev => prev ? { ...prev, visible: false } : null)}
+              className="ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+            >
+              <Trash2 size={14} />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -849,21 +860,6 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           >
             <AlertCircle size={14} />
             <span>{error}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <AnimatePresence>
-        {isOutdated && translatedText && (
-          <motion.div
-            initial={{ opacity: 0, y: -5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -5 }}
-            className="flex justify-center"
-          >
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold uppercase tracking-widest shadow-sm">
-              <AlertCircle size={12} />
-              <span>Estilo alterado — clique em 'Traduzir com IA' para atualizar</span>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1115,6 +1111,24 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
           ) : null}
         </AnimatePresence>
       </div>
+      {/* TTS Feedback Popup */}
+      <AnimatePresence>
+        {ttsFeedback && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] px-6 py-2.5 rounded-2xl bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md shadow-2xl border border-slate-200 dark:border-white/10 flex items-center gap-3 pointer-events-none"
+          >
+            <div className="flex items-center justify-center w-6 h-6 rounded-lg bg-[#7B3FE4]/10 text-[#7B3FE4]">
+              <Volume2 size={14} className="animate-pulse" />
+            </div>
+            <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 whitespace-nowrap">
+              {ttsFeedback}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   </div>
 );
