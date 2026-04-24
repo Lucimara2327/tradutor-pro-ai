@@ -297,7 +297,7 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
 
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
-      source.playbackRate.value = settings.audioSpeed;
+      source.playbackRate.value = settings.audioSpeed * 0.9;
       
       const gainNode = audioContextRef.current.createGain();
       gainNode.gain.value = 0.7;
@@ -329,52 +329,65 @@ export default function Translator({ settings, setSettings, addTranslation }: Tr
       // Feedback indicating fallback
       setTtsFeedback("🔊 Preparando voz...");
       
-      const utterance = new SpeechSynthesisUtterance(text);
-      const targetLang = langCode === 'auto' ? 'pt-BR' : langCode;
-      utterance.lang = targetLang;
-      utterance.volume = 0.7;
-      utterance.rate = settings.audioSpeed;
-      utterance.pitch = 1.0;
+      const chunks = splitLongText(text, 200); // Smaller chunks for more natural pauses
+      let chunkIndex = 0;
 
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
+      const speakChunk = () => {
+        if (chunkIndex >= chunks.length) {
+          setIsSpeaking(false);
+          setAudioState('idle');
+          setTtsFeedback(null);
+          return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(chunks[chunkIndex]);
+        const targetLang = langCode === 'auto' ? 'pt-BR' : langCode;
+        utterance.lang = targetLang;
+        utterance.volume = 0.7;
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
         const preferredVoice = voices.find(v => 
           v.lang.startsWith(targetLang) && 
           (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Premium'))
         ) || voices.find(v => v.lang.startsWith(targetLang));
         
-        if (preferredVoice) {
-          utterance.voice = preferredVoice;
-        }
-      }
+        if (preferredVoice) utterance.voice = preferredVoice;
 
-      utterance.onstart = () => {
-        if (speechId === currentSpeechIdRef.current) {
-          setIsSpeaking(true);
-          setAudioState('playing');
-          setTtsFeedback(null);
-        }
-      };
-      utterance.onend = () => {
-        if (speechId === currentSpeechIdRef.current) {
-          setIsSpeaking(false);
-          setAudioState('idle');
-          setTtsFeedback(null);
-        }
-      };
-      utterance.onerror = () => {
-        if (speechId === currentSpeechIdRef.current) {
-          setIsSpeaking(false);
-          setAudioState('idle');
-          setTtsFeedback("Erro ao gerar áudio");
-          setTimeout(() => {
-            if (speechId === currentSpeechIdRef.current) {
+        utterance.onstart = () => {
+          if (speechId === currentSpeechIdRef.current) {
+            setIsSpeaking(true);
+            setAudioState('playing');
+            setTtsFeedback(null);
+          }
+        };
+
+        utterance.onend = () => {
+          if (speechId === currentSpeechIdRef.current) {
+            chunkIndex++;
+            if (chunkIndex < chunks.length) {
+              setTimeout(speakChunk, 400); // Small pause for natural flow
+            } else {
+              setIsSpeaking(false);
+              setAudioState('idle');
               setTtsFeedback(null);
             }
-          }, 2000);
-        }
+          }
+        };
+
+        utterance.onerror = () => {
+          if (speechId === currentSpeechIdRef.current) {
+            setIsSpeaking(false);
+            setAudioState('idle');
+            setTtsFeedback("Erro ao gerar áudio");
+            setTimeout(() => { if (speechId === currentSpeechIdRef.current) setTtsFeedback(null); }, 2000);
+          }
+        };
+        window.speechSynthesis.speak(utterance);
       };
-      window.speechSynthesis.speak(utterance);
+      
+      speakChunk();
     }
   };
 
